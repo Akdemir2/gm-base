@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Providers } from "./providers";
 
 export const metadata: Metadata = {
   title: "GM Base",
-  description: "Start your day on Base.",
+  description: "One GM. Every day. Onchain.",
+  other: {
+    "base:app_id": "6946df93d19763ca26ddc726",
+  },
 };
 
 export default function RootLayout({
@@ -14,9 +16,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>
-        <Providers>{children}</Providers>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
