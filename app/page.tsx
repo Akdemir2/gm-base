@@ -7,6 +7,9 @@ const GM_CONTRACT = "0xE0712f5fB8b487Ba229bDeE27259c6D4B1696bfb";
 const BASE_MAINNET_CHAIN_ID = "0x2105";
 const BASE_MAINNET_DECIMAL = 8453;
 const GM_SELECTOR = "0xc0129d43";
+
+type Hex = `0x${string}`;
+type Address = `0x${string}`;
 const GET_USER_STATS_SELECTOR = "0x4e43603a";
 const CAN_GM_SELECTOR = "0xc7510bb6";
 
@@ -58,8 +61,9 @@ function hexToNumber(hex?: string) {
 }
 
 function formatEthFromWei(wei: bigint) {
-  const whole = wei / 10n ** 18n;
-  const fraction = (wei % 10n ** 18n)
+  const weiPerEth = BigInt("1000000000000000000");
+  const whole = wei / weiPerEth;
+  const fraction = (wei % weiPerEth)
     .toString()
     .padStart(18, "0")
     .replace(/0+$/, "");
@@ -393,7 +397,7 @@ export default function Home() {
       const canGMWords = decodeUint256Words(canGMResult);
       const statsWords = decodeUint256Words(statsResult);
 
-      const available = (canGMWords[0] ?? 0n) !== 0n;
+      const available = (canGMWords[0] ?? BigInt(0)) !== BigInt(0);
 
       if (statsWords.length < 3) {
         throw new Error("GM V2 returned incomplete profile data.");
@@ -444,7 +448,7 @@ export default function Home() {
 
       const accounts = (await wallet.provider.request({
         method: "eth_requestAccounts",
-      })) as string[];
+      })) as Address[];
 
       if (!accounts?.length) {
         throw new Error("The wallet did not return an account.");
@@ -508,7 +512,7 @@ export default function Home() {
 
   async function waitForReceipt(
     provider: EIP1193Provider,
-    hash: string
+    hash: Hex
   ): Promise<Receipt> {
     for (let i = 0; i < 60; i++) {
       const receipt = await provider.request({
@@ -546,12 +550,12 @@ export default function Home() {
 
       let accounts = (await provider.request({
         method: "eth_accounts",
-      })) as string[];
+      })) as Address[];
 
       if (!accounts?.length) {
         accounts = (await provider.request({
           method: "eth_requestAccounts",
-        })) as string[];
+        })) as Address[];
       }
 
       if (!accounts?.length) {
@@ -664,7 +668,7 @@ export default function Home() {
       const txHashResult = (await provider.request({
         method: "eth_sendTransaction",
         params: [transactionParams],
-      })) as string;
+      })) as Hex;
 
       setTxHash(txHashResult);
       setStatus("confirming");
