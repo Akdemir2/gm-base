@@ -36,6 +36,7 @@ type WalletProvider = {
 type Status =
   | "idle"
   | "checking"
+  | "changing-account"
   | "switching"
   | "estimating"
   | "sending"
@@ -507,6 +508,111 @@ export default function Home() {
     }
   }
 
+  async function changeWalletAccount() {
+    if (!selectedProvider) {
+      setError("No wallet is selected.");
+      return;
+    }
+
+    const provider = selectedProvider.provider;
+
+    try {
+      setError("");
+      setStatus("changing-account");
+      setTxHash(undefined);
+      setEstimatedFee(undefined);
+      setGmAvailable(undefined);
+      lastGMCheckKeyRef.current = null;
+
+      let accounts: Address[] = [];
+
+      try {
+        // EIP-2255: supported wallets can reopen their account permission /
+        // account-selection UI without changing the wallet provider itself.
+        await provider.request({
+          method: "wallet_requestPermissions",
+          params: [{ eth_accounts: {} }],
+        });
+
+        accounts = (await provider.request({
+          method: "eth_accounts",
+        })) as Address[];
+      } catch (permissionError) {
+        if (isUserRejectedError(permissionError)) {
+          setStatus(gmAvailable === false ? "already-gm" : "idle");
+          return;
+        }
+
+        console.info(
+          "wallet_requestPermissions unavailable; trying revoke + reconnect:",
+          permissionError
+        );
+
+        try {
+          await provider.request({
+            method: "wallet_revokePermissions",
+            params: [{ eth_accounts: {} }],
+          });
+        } catch {
+          // Optional method. Some wallets do not implement it.
+        }
+
+        accounts = (await provider.request({
+          method: "eth_requestAccounts",
+        })) as Address[];
+      }
+
+      if (!accounts?.length) {
+        accounts = (await provider.request({
+          method: "eth_requestAccounts",
+        })) as Address[];
+      }
+
+      if (!accounts?.length) {
+        throw new Error("The wallet did not return an account.");
+      }
+
+      const nextAddress = accounts[0];
+      const currentChain = (await provider.request({
+        method: "eth_chainId",
+      })) as string;
+
+      setAddress(nextAddress);
+      setChainId(hexToNumber(currentChain));
+      setTxHash(undefined);
+      setEstimatedFee(undefined);
+      setGmAvailable(undefined);
+      setWalletProgress({
+        totalGM: 0,
+        streak: 0,
+        lastGMDay: 0,
+      });
+      lastGMCheckKeyRef.current = null;
+      setError("");
+
+      if (currentChain === BASE_MAINNET_CHAIN_ID) {
+        await checkGMAvailability(provider, nextAddress, true);
+      } else {
+        setStatus("idle");
+      }
+    } catch (err) {
+      if (isUserRejectedError(err)) {
+        console.info("Account change cancelled by user.");
+        setStatus(gmAvailable === false ? "already-gm" : "idle");
+        setError("");
+        return;
+      }
+
+      console.error("ACCOUNT CHANGE ERROR:", err);
+      setStatus("error");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not change wallet account."
+      );
+    }
+  }
+
   async function switchToBase() {
     if (!selectedProvider) {
       setError("No wallet is selected.");
@@ -900,6 +1006,7 @@ export default function Home() {
 
   const isBusy =
     status === "checking" ||
+    status === "changing-account" ||
     status === "switching" ||
     status === "estimating" ||
     status === "sending" ||
@@ -1077,9 +1184,24 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 rounded-full border border-gray-800 px-3 py-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    <span className="text-[11px] text-gray-500">Connected</span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={changeWalletAccount}
+                      disabled={isBusy}
+                      className="rounded-full border border-gray-800 px-3 py-1.5 text-[11px] font-medium text-gray-400 transition hover:bg-gray-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {status === "changing-account"
+                        ? "Changing..."
+                        : "Change account"}
+                    </button>
+
+                    <div className="flex items-center gap-2 rounded-full border border-gray-800 px-3 py-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                      <span className="text-[11px] text-gray-500">
+                        Connected
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
