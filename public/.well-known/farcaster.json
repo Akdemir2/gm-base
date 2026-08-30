@@ -1,0 +1,26 @@
+{
+  "frame": {
+    "name": "GM Base",
+    "version": "1",
+    "iconUrl": "https://gm-base-six.vercel.app/icon.png",
+    "homeUrl": "https://gm-base-six.vercel.app",
+    "imageUrl": "https://gm-base-six.vercel.app/gm-base-share-card.jpg",
+    "buttonTitle": "Send your GM",
+    "splashImageUrl": "https://gm-base-six.vercel.app/splash.png",
+    "splashBackgroundColor": "#000000",
+    "subtitle": "One GM. Every day. Onchain.",
+    "description": "Start your day on Base. Send one GM each UTC day, build your onchain streak, and track your GM history.",
+    "primaryCategory": "social",
+    "tags": [
+      "base",
+      "onchain",
+      "gm",
+      "social",
+      "streak"
+    ],
+    "tagline": "One GM. Every day. Onchain.",
+    "ogTitle": "GM Base",
+    "ogDescription": "Send one GM every day on Base and build your onchain streak",
+    "ogImageUrl": "https://gm-base-six.vercel.app/gm-base-share-card.jpg"
+  }
+}
