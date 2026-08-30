@@ -7,11 +7,16 @@ const GM_CONTRACT = "0xE0712f5fB8b487Ba229bDeE27259c6D4B1696bfb";
 const BASE_MAINNET_CHAIN_ID = "0x2105";
 const BASE_MAINNET_DECIMAL = 8453;
 const GM_SELECTOR = "0xc0129d43";
+const BUILDER_CODE = "bc_f54ls5g6";
+const BUILDER_CODE_SUFFIX =
+  "0x62635f6635346c733567360b0080218021802180218021802180218021";
 
 type Hex = `0x${string}`;
 type Address = `0x${string}`;
 const GET_USER_STATS_SELECTOR = "0x4e43603a";
 const CAN_GM_SELECTOR = "0xc7510bb6";
+const GM_DATA_WITH_ATTRIBUTION =
+  `${GM_SELECTOR}${BUILDER_CODE_SUFFIX.slice(2)}` as Hex;
 
 type WalletProviderInfo = {
   uuid: string;
@@ -612,7 +617,7 @@ export default function Home() {
             {
               from: sender,
               to: GM_CONTRACT,
-              data: GM_SELECTOR,
+              data: GM_DATA_WITH_ATTRIBUTION,
             },
           ],
         })) as string;
@@ -655,7 +660,7 @@ export default function Home() {
       const transactionParams: Record<string, string> = {
         from: sender,
         to: GM_CONTRACT,
-        data: GM_SELECTOR,
+        data: GM_DATA_WITH_ATTRIBUTION,
         gas: gasEstimate,
       };
 
@@ -663,6 +668,8 @@ export default function Home() {
         transactionParams.gasPrice = gasPrice;
       }
 
+      console.log("GM Builder Code:", BUILDER_CODE);
+      console.log("GM attribution suffix:", BUILDER_CODE_SUFFIX);
       console.log("GM transaction parameters:", transactionParams);
 
       const txHashResult = (await provider.request({
