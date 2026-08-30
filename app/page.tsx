@@ -10,6 +10,7 @@ const GM_SELECTOR = "0xc0129d43";
 const BUILDER_CODE = "bc_f54ls5g6";
 const BUILDER_CODE_SUFFIX =
   "0x62635f6635346c733567360b0080218021802180218021802180218021";
+const APP_URL = "https://gm-base-six.vercel.app";
 
 type Hex = `0x${string}`;
 type Address = `0x${string}`;
@@ -749,6 +750,39 @@ export default function Home() {
     }
   }
 
+  function shareOnX() {
+    if (typeof window === "undefined") return;
+
+    const streakText = `${walletProgress.streak} ${
+      walletProgress.streak === 1 ? "day" : "days"
+    } streak`;
+    const totalText = `${walletProgress.totalGM} total ${
+      walletProgress.totalGM === 1 ? "GM" : "GMs"
+    }`;
+
+    const shareText = [
+      "👋 GM from Base!",
+      "",
+      "I just sent my daily GM onchain.",
+      `🔥 ${streakText} · 👋 ${totalText}`,
+      "",
+      "One GM. Every day. Onchain.",
+      "",
+      APP_URL,
+      "@base",
+    ].join("\n");
+
+    const shareUrl = `https://x.com/intent/post?text=${encodeURIComponent(
+      shareText
+    )}`;
+
+    const opened = window.open(shareUrl, "_blank", "noopener,noreferrer");
+
+    if (!opened) {
+      window.location.href = shareUrl;
+    }
+  }
+
   async function disconnectWallet() {
     try {
       if (selectedProvider) {
@@ -1015,6 +1049,15 @@ export default function Home() {
                         ? "Your GM is onchain for today. Come back after the next UTC day begins."
                         : "Send today's GM and keep your onchain streak moving."}
                     </p>
+
+                    {gmCompletedToday && (
+                      <button
+                        onClick={shareOnX}
+                        className="mt-6 w-full rounded-2xl border border-gray-700 bg-black py-4 text-base font-bold text-white transition hover:border-gray-500 hover:bg-gray-900"
+                      >
+                        Share on X ↗
+                      </button>
+                    )}
 
                     {!gmCompletedToday && (
                       <button
