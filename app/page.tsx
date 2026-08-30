@@ -36,7 +36,6 @@ type WalletProvider = {
 type Status =
   | "idle"
   | "checking"
-  | "changing-account"
   | "switching"
   | "estimating"
   | "sending"
@@ -227,6 +226,8 @@ export default function Home() {
   const [walletProviders, setWalletProviders] = useState<WalletProvider[]>([]);
   const [selectedProvider, setSelectedProvider] =
     useState<WalletProvider | null>(null);
+  const [isFarcasterMiniApp, setIsFarcasterMiniApp] = useState(false);
+  const [walletDiscoveryReady, setWalletDiscoveryReady] = useState(false);
   const [address, setAddress] = useState<string | undefined>();
   const [chainId, setChainId] = useState<number | undefined>();
   const [status, setStatus] = useState<Status>("idle");
@@ -245,7 +246,72 @@ export default function Home() {
   const lastGMCheckKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function discoverFarcasterWallet() {
+      try {
+        const inMiniApp = await Promise.race([
+          sdk.isInMiniApp(),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), 1500)
+          ),
+        ]);
+
+        if (cancelled) return;
+
+        if (!inMiniApp) {
+          setIsFarcasterMiniApp(false);
+          setWalletDiscoveryReady(true);
+          return;
+        }
+
+        setIsFarcasterMiniApp(true);
+
+        const nativeProvider = await Promise.race([
+          sdk.wallet.getEthereumProvider(),
+          new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), 3000)
+          ),
+        ]);
+
+        if (cancelled) return;
+
+        if (nativeProvider) {
+          const farcasterWallet: WalletProvider = {
+            info: {
+              uuid: "farcaster-native-wallet",
+              name: "Farcaster Wallet",
+              icon: "",
+              rdns: "Farcaster Mini App",
+            },
+            provider: nativeProvider as EIP1193Provider,
+          };
+
+          setWalletProviders([farcasterWallet]);
+        } else {
+          console.info(
+            "Farcaster wallet provider was not available; falling back to injected wallets."
+          );
+        }
+      } catch (err) {
+        console.info("Farcaster wallet discovery unavailable:", err);
+      } finally {
+        if (!cancelled) {
+          setWalletDiscoveryReady(true);
+        }
+      }
+    }
+
+    void discoverFarcasterWallet();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
+    if (isFarcasterMiniApp) return;
 
     const discovered = new Map<string, WalletProvider>();
 
@@ -281,7 +347,7 @@ export default function Home() {
         handleProviderAnnouncement
       );
     };
-  }, []);
+  }, [isFarcasterMiniApp]);
 
   useEffect(() => {
     if (!selectedProvider) return;
@@ -505,111 +571,6 @@ export default function Home() {
     } catch (err) {
       console.error("CONNECT ERROR:", err);
       setError(err instanceof Error ? err.message : "Wallet connection failed.");
-    }
-  }
-
-  async function changeWalletAccount() {
-    if (!selectedProvider) {
-      setError("No wallet is selected.");
-      return;
-    }
-
-    const provider = selectedProvider.provider;
-
-    try {
-      setError("");
-      setStatus("changing-account");
-      setTxHash(undefined);
-      setEstimatedFee(undefined);
-      setGmAvailable(undefined);
-      lastGMCheckKeyRef.current = null;
-
-      let accounts: Address[] = [];
-
-      try {
-        // EIP-2255: supported wallets can reopen their account permission /
-        // account-selection UI without changing the wallet provider itself.
-        await provider.request({
-          method: "wallet_requestPermissions",
-          params: [{ eth_accounts: {} }],
-        });
-
-        accounts = (await provider.request({
-          method: "eth_accounts",
-        })) as Address[];
-      } catch (permissionError) {
-        if (isUserRejectedError(permissionError)) {
-          setStatus(gmAvailable === false ? "already-gm" : "idle");
-          return;
-        }
-
-        console.info(
-          "wallet_requestPermissions unavailable; trying revoke + reconnect:",
-          permissionError
-        );
-
-        try {
-          await provider.request({
-            method: "wallet_revokePermissions",
-            params: [{ eth_accounts: {} }],
-          });
-        } catch {
-          // Optional method. Some wallets do not implement it.
-        }
-
-        accounts = (await provider.request({
-          method: "eth_requestAccounts",
-        })) as Address[];
-      }
-
-      if (!accounts?.length) {
-        accounts = (await provider.request({
-          method: "eth_requestAccounts",
-        })) as Address[];
-      }
-
-      if (!accounts?.length) {
-        throw new Error("The wallet did not return an account.");
-      }
-
-      const nextAddress = accounts[0];
-      const currentChain = (await provider.request({
-        method: "eth_chainId",
-      })) as string;
-
-      setAddress(nextAddress);
-      setChainId(hexToNumber(currentChain));
-      setTxHash(undefined);
-      setEstimatedFee(undefined);
-      setGmAvailable(undefined);
-      setWalletProgress({
-        totalGM: 0,
-        streak: 0,
-        lastGMDay: 0,
-      });
-      lastGMCheckKeyRef.current = null;
-      setError("");
-
-      if (currentChain === BASE_MAINNET_CHAIN_ID) {
-        await checkGMAvailability(provider, nextAddress, true);
-      } else {
-        setStatus("idle");
-      }
-    } catch (err) {
-      if (isUserRejectedError(err)) {
-        console.info("Account change cancelled by user.");
-        setStatus(gmAvailable === false ? "already-gm" : "idle");
-        setError("");
-        return;
-      }
-
-      console.error("ACCOUNT CHANGE ERROR:", err);
-      setStatus("error");
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Could not change wallet account."
-      );
     }
   }
 
@@ -1006,7 +967,6 @@ export default function Home() {
 
   const isBusy =
     status === "checking" ||
-    status === "changing-account" ||
     status === "switching" ||
     status === "estimating" ||
     status === "sending" ||
@@ -1093,7 +1053,9 @@ export default function Home() {
                       <div>
                         <h2 className="text-xl font-bold">Choose a wallet</h2>
                         <p className="mt-1 text-sm text-gray-500">
-                          Detected in this browser
+                          {isFarcasterMiniApp
+                            ? "Provided by Farcaster"
+                            : "Detected in this browser"}
                         </p>
                       </div>
 
@@ -1108,7 +1070,9 @@ export default function Home() {
                     <div className="space-y-3">
                       {walletProviders.length === 0 ? (
                         <div className="rounded-2xl border border-gray-900 bg-black py-8 text-center text-sm text-gray-500">
-                          Detecting wallets...
+                          {walletDiscoveryReady
+                            ? "No wallet provider found."
+                            : "Detecting wallets..."}
                         </div>
                       ) : (
                         walletProviders.map((wallet) => (
@@ -1153,7 +1117,9 @@ export default function Home() {
                     )}
 
                     <p className="mt-5 text-center text-[11px] text-gray-700">
-                      Wallet discovery via EIP-6963
+                      {isFarcasterMiniApp
+                        ? "Native Farcaster Mini App wallet provider"
+                        : "Wallet discovery via EIP-6963"}
                     </p>
                   </div>
                 </div>
@@ -1185,16 +1151,11 @@ export default function Home() {
                   </div>
 
                   <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={changeWalletAccount}
-                      disabled={isBusy}
-                      className="rounded-full border border-gray-800 px-3 py-1.5 text-[11px] font-medium text-gray-400 transition hover:bg-gray-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {status === "changing-account"
-                        ? "Changing..."
-                        : "Change account"}
-                    </button>
+                    <div className="rounded-full border border-gray-800 px-3 py-1.5 text-[11px] font-medium text-gray-500">
+                      {selectedProvider.info.uuid === "farcaster-native-wallet"
+                        ? "Farcaster native"
+                        : "Browser wallet"}
+                    </div>
 
                     <div className="flex items-center gap-2 rounded-full border border-gray-800 px-3 py-1.5">
                       <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
