@@ -1,4 +1,9 @@
 {
+  "accountAssociation": {
+    "header": "eyJmaWQiOjEzNTE4NTUsInR5cGUiOiJjdXN0b2R5Iiwia2V5IjoiMHhhRWNlREVEMWNkNkY5MTk0RTQ5M0JlMjUzREQ3OGNlMTQ3OUM0RjE5In0",
+    "payload": "eyJkb21haW4iOiJnbS1iYXNlLXNpeC52ZXJjZWwuYXBwIn0",
+    "signature": "4lwQOyM++1rebgXV5rZBmY32ln5nfjh6mZqP8VEVyZQYGA80RWqR/Mp+qgNq0wJXzgX0tZG2/UNixZFGRS8m/Bs="
+  },
   "frame": {
     "name": "GM Base",
     "version": "1",
