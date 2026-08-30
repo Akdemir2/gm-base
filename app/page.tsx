@@ -229,6 +229,9 @@ export default function Home() {
   const [isFarcasterMiniApp, setIsFarcasterMiniApp] = useState(false);
   const [walletDiscoveryReady, setWalletDiscoveryReady] = useState(false);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+  const [isVerifyingAccount, setIsVerifyingAccount] = useState(false);
+  const [isFarcasterAccountVerified, setIsFarcasterAccountVerified] =
+    useState(false);
   const [address, setAddress] = useState<string | undefined>();
   const [chainId, setChainId] = useState<number | undefined>();
   const [status, setStatus] = useState<Status>("idle");
@@ -360,6 +363,7 @@ export default function Home() {
 
       const nextAddress = list?.[0];
 
+      setIsFarcasterAccountVerified(false);
       setAddress(nextAddress);
       setTxHash(undefined);
       setEstimatedFee(undefined);
@@ -383,6 +387,7 @@ export default function Home() {
     const handleChainChanged = (chain: unknown) => {
       const nextChain = String(chain);
 
+      setIsFarcasterAccountVerified(false);
       setChainId(hexToNumber(nextChain));
       setTxHash(undefined);
       setEstimatedFee(undefined);
@@ -590,6 +595,9 @@ export default function Home() {
       })) as string;
 
       setSelectedProvider(wallet);
+      setIsFarcasterAccountVerified(
+        wallet.info.uuid !== "farcaster-native-wallet"
+      );
       setAddress(accounts[0]);
       setChainId(hexToNumber(currentChain));
       setShowWallets(false);
@@ -600,6 +608,86 @@ export default function Home() {
     } catch (err) {
       console.error("CONNECT ERROR:", err);
       setError(err instanceof Error ? err.message : "Wallet connection failed.");
+    }
+  }
+
+  async function verifyFarcasterAccount() {
+    if (
+      !selectedProvider ||
+      selectedProvider.info.uuid !== "farcaster-native-wallet"
+    ) {
+      return;
+    }
+
+    const provider = selectedProvider.provider;
+
+    try {
+      setError("");
+      setIsVerifyingAccount(true);
+      setIsFarcasterAccountVerified(false);
+      setTxHash(undefined);
+      setEstimatedFee(undefined);
+
+      // Important: use eth_requestAccounts here, not only eth_accounts.
+      // In Farcaster this gives the host / preferred external wallet a chance
+      // to surface its wallet-selection / account-switch UI.
+      const requestedAccounts = (await provider.request({
+        method: "eth_requestAccounts",
+      })) as Address[];
+
+      if (!requestedAccounts?.length) {
+        throw new Error("The wallet did not return an account.");
+      }
+
+      // Re-read the provider after the interactive request has completed.
+      const currentAccounts = (await provider.request({
+        method: "eth_accounts",
+      })) as Address[];
+
+      const verifiedAddress =
+        currentAccounts?.[0] ?? requestedAccounts[0];
+
+      if (!verifiedAddress) {
+        throw new Error("Could not verify the active wallet account.");
+      }
+
+      const currentChain = (await provider.request({
+        method: "eth_chainId",
+      })) as string;
+
+      setAddress(verifiedAddress);
+      setChainId(hexToNumber(currentChain));
+      setGmAvailable(undefined);
+      lastGMCheckKeyRef.current = null;
+
+      if (currentChain === BASE_MAINNET_CHAIN_ID) {
+        await checkGMAvailability(provider, verifiedAddress, true);
+      } else {
+        setStatus("idle");
+      }
+
+      // Only enable GM after the interactive account request has finished
+      // and the account has been re-read from the provider.
+      setIsFarcasterAccountVerified(true);
+      setError("");
+    } catch (err) {
+      setIsFarcasterAccountVerified(false);
+
+      if (isUserRejectedError(err)) {
+        setError(
+          "Wallet verification was cancelled. Verify or switch your wallet account before sending GM."
+        );
+        return;
+      }
+
+      console.error("FARCASTER ACCOUNT VERIFY ERROR:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not verify the Farcaster wallet account."
+      );
+    } finally {
+      setIsVerifyingAccount(false);
     }
   }
 
@@ -665,6 +753,16 @@ export default function Home() {
       return;
     }
 
+    if (
+      selectedProvider.info.uuid === "farcaster-native-wallet" &&
+      !isFarcasterAccountVerified
+    ) {
+      setError(
+        "Verify or switch your Farcaster wallet account before sending GM."
+      );
+      return;
+    }
+
     if (gmAvailable === false) {
       setStatus("already-gm");
       setError("");
@@ -696,6 +794,31 @@ export default function Home() {
       }
 
       const sender = accounts[0];
+
+      if (
+        address &&
+        sender.toLowerCase() !== address.toLowerCase()
+      ) {
+        setAddress(sender);
+        setIsFarcasterAccountVerified(false);
+        setGmAvailable(undefined);
+        lastGMCheckKeyRef.current = null;
+
+        const currentChain = (await provider.request({
+          method: "eth_chainId",
+        })) as string;
+
+        setChainId(hexToNumber(currentChain));
+
+        if (currentChain === BASE_MAINNET_CHAIN_ID) {
+          await checkGMAvailability(provider, sender, true);
+        }
+
+        throw new Error(
+          "Your wallet account changed. The transaction was cancelled. Verify the displayed account, then send GM again."
+        );
+      }
+
       setAddress(sender);
 
       let providerChain = (await provider.request({
@@ -797,6 +920,37 @@ export default function Home() {
       console.log("GM Builder Code:", BUILDER_CODE);
       console.log("GM attribution suffix:", BUILDER_CODE_SUFFIX);
       console.log("GM transaction parameters:", transactionParams);
+
+      const accountsBeforeSend = (await provider.request({
+        method: "eth_accounts",
+      })) as Address[];
+
+      const accountBeforeSend = accountsBeforeSend?.[0];
+
+      if (
+        !accountBeforeSend ||
+        accountBeforeSend.toLowerCase() !== sender.toLowerCase()
+      ) {
+        if (accountBeforeSend) {
+          setAddress(accountBeforeSend);
+        }
+
+        setIsFarcasterAccountVerified(false);
+        setGmAvailable(undefined);
+        lastGMCheckKeyRef.current = null;
+
+        if (accountBeforeSend) {
+          await checkGMAvailability(
+            provider,
+            accountBeforeSend,
+            true
+          );
+        }
+
+        throw new Error(
+          "Wallet account changed before signing. The GM transaction was cancelled. Verify the active account and try again."
+        );
+      }
 
       const txHashResult = (await provider.request({
         method: "eth_sendTransaction",
@@ -976,6 +1130,8 @@ export default function Home() {
       }
     } finally {
       setSelectedProvider(null);
+      setIsFarcasterAccountVerified(false);
+      setIsVerifyingAccount(false);
       setAddress(undefined);
       setChainId(undefined);
       setTxHash(undefined);
@@ -995,6 +1151,7 @@ export default function Home() {
   const isConnected = !!selectedProvider && !!address;
 
   const isBusy =
+    isVerifyingAccount ||
     status === "checking" ||
     status === "switching" ||
     status === "estimating" ||
@@ -1005,9 +1162,13 @@ export default function Home() {
     chainId === BASE_MAINNET_DECIMAL &&
     gmAvailable === false;
 
+  const farcasterVerificationRequired =
+    selectedProvider?.info.uuid === "farcaster-native-wallet";
+
   const gmReady =
     chainId === BASE_MAINNET_DECIMAL &&
     gmAvailable === true &&
+    (!farcasterVerificationRequired || isFarcasterAccountVerified) &&
     !isBusy;
 
   return (
@@ -1211,6 +1372,57 @@ export default function Home() {
                 </div>
               </div>
 
+              {selectedProvider.info.uuid === "farcaster-native-wallet" && (
+                <div
+                  className={`rounded-[2rem] border p-5 ${
+                    isFarcasterAccountVerified
+                      ? "border-green-900 bg-green-950/20"
+                      : "border-yellow-900 bg-yellow-950/20"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-600">
+                        Wallet account
+                      </p>
+                      <h3 className="mt-1 font-semibold">
+                        {isFarcasterAccountVerified
+                          ? "Account verified"
+                          : "Verify before GM"}
+                      </h3>
+                      <p className="mt-2 text-xs leading-5 text-gray-500">
+                        {isFarcasterAccountVerified
+                          ? `GM will use ${shortenAddress(address)}.`
+                          : "Open Farcaster's wallet selector and tap your preferred wallet row. For OKX, use Switch if you want another account."}
+                      </p>
+                    </div>
+
+                    <span
+                      className={`rounded-full border px-3 py-1 text-[11px] ${
+                        isFarcasterAccountVerified
+                          ? "border-green-900 text-green-500"
+                          : "border-yellow-900 text-yellow-500"
+                      }`}
+                    >
+                      {isFarcasterAccountVerified ? "Verified" : "Required"}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => void verifyFarcasterAccount()}
+                    disabled={isVerifyingAccount}
+                    className="mt-4 w-full rounded-2xl border border-gray-700 bg-black py-3.5 text-sm font-semibold text-white transition hover:border-gray-500 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isVerifyingAccount
+                      ? "Waiting for wallet..."
+                      : isFarcasterAccountVerified
+                        ? "Switch / verify account again"
+                        : "Verify / switch wallet account"}
+                  </button>
+                </div>
+              )}
+
               {chainId !== BASE_MAINNET_DECIMAL ? (
                 <div className="rounded-[2rem] border border-yellow-900 bg-yellow-950/20 p-6 text-center">
                   <div className="text-3xl">⚠️</div>
@@ -1284,7 +1496,10 @@ export default function Home() {
                         onClick={handleGM}
                         className="mt-6 w-full rounded-2xl bg-white py-4 text-base font-bold text-black transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        {status === "checking"
+                        {farcasterVerificationRequired &&
+                        !isFarcasterAccountVerified
+                          ? "Verify wallet account first"
+                          : status === "checking"
                           ? "Checking..."
                           : status === "estimating"
                           ? "Preparing transaction..."
