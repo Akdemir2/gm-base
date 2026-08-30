@@ -228,6 +228,7 @@ export default function Home() {
     useState<WalletProvider | null>(null);
   const [isFarcasterMiniApp, setIsFarcasterMiniApp] = useState(false);
   const [walletDiscoveryReady, setWalletDiscoveryReady] = useState(false);
+  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
   const [address, setAddress] = useState<string | undefined>();
   const [chainId, setChainId] = useState<number | undefined>();
   const [status, setStatus] = useState<Status>("idle");
@@ -554,10 +555,16 @@ export default function Home() {
         return;
       }
 
-      await connectWallet(farcasterWallet);
+      try {
+        setIsConnectingWallet(true);
+        await connectWallet(farcasterWallet);
+      } finally {
+        setIsConnectingWallet(false);
+      }
       return;
     }
 
+    setIsConnectingWallet(false);
     setShowWallets(true);
   }
 
@@ -1043,13 +1050,25 @@ export default function Home() {
 
               <button
                 onClick={() => void handleConnectClick()}
-                disabled={isFarcasterMiniApp && !walletDiscoveryReady}
+                disabled={
+                  isFarcasterMiniApp &&
+                  (!walletDiscoveryReady || isConnectingWallet)
+                }
                 className="w-full rounded-2xl bg-white py-4 font-semibold text-black transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isFarcasterMiniApp && !walletDiscoveryReady
                   ? "Preparing wallet..."
-                  : "Connect wallet"}
+                  : isFarcasterMiniApp && isConnectingWallet
+                    ? "Connecting wallet..."
+                    : "Connect wallet"}
               </button>
+
+              {isFarcasterMiniApp && isConnectingWallet && (
+                <p className="mt-3 text-center text-xs leading-5 text-gray-500">
+                  Select your preferred wallet in Farcaster to continue.
+                  If you use OKX, tap the OKX Wallet row to open its approval popup.
+                </p>
+              )}
 
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-2xl border border-gray-900 bg-gray-950/60 p-3">
