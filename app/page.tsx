@@ -12,6 +12,7 @@ const BUILDER_CODE = "bc_f54ls5g6";
 const BUILDER_CODE_SUFFIX =
   "0x62635f6635346c733567360b0080218021802180218021802180218021";
 const APP_URL = "https://gm-base-six.vercel.app/?card=2";
+const FARCASTER_APP_URL = "https://gm-base-six.vercel.app";
 
 type Hex = `0x${string}`;
 type Address = `0x${string}`;
@@ -813,6 +814,58 @@ export default function Home() {
     }
   }
 
+  async function shareOnFarcaster() {
+    if (typeof window === "undefined") return;
+
+    const streakText = `${walletProgress.streak} ${
+      walletProgress.streak === 1 ? "day" : "days"
+    } streak`;
+    const totalText = `${walletProgress.totalGM} total ${
+      walletProgress.totalGM === 1 ? "GM" : "GMs"
+    }`;
+
+    const shareText = [
+      "👋 GM from Base!",
+      "",
+      "I just sent my daily GM onchain.",
+      `🔥 ${streakText} · 👋 ${totalText}`,
+      "",
+      "One GM. Every day. Onchain.",
+      "",
+      "Send yours 👇",
+    ].join("\n");
+
+    try {
+      const isMiniApp = await Promise.race([
+        sdk.isInMiniApp(),
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), 1500)
+        ),
+      ]);
+
+      if (isMiniApp) {
+        await sdk.actions.composeCast({
+          text: shareText,
+          embeds: [FARCASTER_APP_URL],
+        });
+        return;
+      }
+    } catch (err) {
+      console.info("Farcaster native share unavailable:", err);
+    }
+
+    const params = new URLSearchParams();
+    params.set("text", shareText);
+    params.append("embeds[]", FARCASTER_APP_URL);
+
+    const shareUrl = `https://farcaster.xyz/~/compose?${params.toString()}`;
+    const opened = window.open(shareUrl, "_blank", "noopener,noreferrer");
+
+    if (!opened) {
+      window.location.href = shareUrl;
+    }
+  }
+
   async function disconnectWallet() {
     try {
       if (selectedProvider) {
@@ -1081,12 +1134,21 @@ export default function Home() {
                     </p>
 
                     {gmCompletedToday && (
-                      <button
-                        onClick={shareOnX}
-                        className="mt-6 w-full rounded-2xl border border-gray-700 bg-black py-4 text-base font-bold text-white transition hover:border-gray-500 hover:bg-gray-900"
-                      >
-                        Share on X ↗
-                      </button>
+                      <div className="mt-6 grid gap-3">
+                        <button
+                          onClick={shareOnFarcaster}
+                          className="w-full rounded-2xl bg-[#855DCD] py-4 text-base font-bold text-white transition hover:opacity-90"
+                        >
+                          Share on Farcaster ↗
+                        </button>
+
+                        <button
+                          onClick={shareOnX}
+                          className="w-full rounded-2xl border border-gray-700 bg-black py-4 text-base font-bold text-white transition hover:border-gray-500 hover:bg-gray-900"
+                        >
+                          Share on X ↗
+                        </button>
+                      </div>
                     )}
 
                     {!gmCompletedToday && (
