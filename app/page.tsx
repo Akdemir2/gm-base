@@ -539,6 +539,28 @@ export default function Home() {
     }
   }
 
+  async function handleConnectClick() {
+    if (isFarcasterMiniApp) {
+      const farcasterWallet = walletProviders.find(
+        (wallet) => wallet.info.uuid === "farcaster-native-wallet"
+      );
+
+      if (!farcasterWallet) {
+        setError(
+          walletDiscoveryReady
+            ? "Farcaster wallet provider is unavailable."
+            : "Preparing Farcaster wallet..."
+        );
+        return;
+      }
+
+      await connectWallet(farcasterWallet);
+      return;
+    }
+
+    setShowWallets(true);
+  }
+
   async function connectWallet(wallet: WalletProvider) {
     try {
       setError("");
@@ -1020,10 +1042,13 @@ export default function Home() {
               </div>
 
               <button
-                onClick={() => setShowWallets(true)}
-                className="w-full rounded-2xl bg-white py-4 font-semibold text-black transition hover:bg-gray-200"
+                onClick={() => void handleConnectClick()}
+                disabled={isFarcasterMiniApp && !walletDiscoveryReady}
+                className="w-full rounded-2xl bg-white py-4 font-semibold text-black transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Connect wallet
+                {isFarcasterMiniApp && !walletDiscoveryReady
+                  ? "Preparing wallet..."
+                  : "Connect wallet"}
               </button>
 
               <div className="grid grid-cols-3 gap-2 text-center">
@@ -1041,7 +1066,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {showWallets && (
+              {showWallets && !isFarcasterMiniApp && (
                 <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:px-6">
                   <div
                     className="absolute inset-0 bg-black/80 backdrop-blur-sm"
