@@ -10,7 +10,7 @@ const GM_SELECTOR = "0xc0129d43";
 const BUILDER_CODE = "bc_f54ls5g6";
 const BUILDER_CODE_SUFFIX =
   "0x62635f6635346c733567360b0080218021802180218021802180218021";
-const APP_URL = "https://gm-base-six.vercel.app";
+const APP_URL = "https://gm-base-six.vercel.app/?card=2";
 
 type Hex = `0x${string}`;
 type Address = `0x${string}`;
@@ -767,6 +767,8 @@ export default function Home() {
       `🔥 ${streakText} · 👋 ${totalText}`,
       "",
       "One GM. Every day. Onchain.",
+      "",
+      "Send yours 👇",
       "",
       APP_URL,
       "@base",
