@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { EIP1193Provider } from "viem";
+import { sdk } from "@farcaster/miniapp-sdk";
 
 const GM_CONTRACT = "0xE0712f5fB8b487Ba229bDeE27259c6D4B1696bfb";
 const BASE_MAINNET_CHAIN_ID = "0x2105";
@@ -193,6 +194,33 @@ function formatUtcDay(day: number) {
 }
 
 export default function Home() {
+  useEffect(() => {
+    let cancelled = false;
+
+    async function signalFarcasterReady() {
+      try {
+        const isMiniApp = await Promise.race([
+          sdk.isInMiniApp(),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), 1500)
+          ),
+        ]);
+
+        if (!cancelled && isMiniApp) {
+          await sdk.actions.ready();
+        }
+      } catch (err) {
+        console.info("Farcaster Mini App SDK unavailable:", err);
+      }
+    }
+
+    void signalFarcasterReady();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [showWallets, setShowWallets] = useState(false);
   const [walletProviders, setWalletProviders] = useState<WalletProvider[]>([]);
   const [selectedProvider, setSelectedProvider] =
