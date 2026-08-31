@@ -7,29 +7,27 @@ export const dynamic = "force-dynamic";
 const GM_CONTRACT =
   "0xE0712f5fB8b487Ba229bDeE27259c6D4B1696bfb" as Address;
 
+const DEPLOYMENT_BLOCK = 50618203;
+
 const GM_EVENT_TOPIC =
   "0xe260dd3f3558e5fbd6a7b62e9eb1370f4660d1dca056ece3036cd21cd5d93ef6";
 
-const BLOCKSCOUT_PUBLIC_BASE = "https://base.blockscout.com";
-const BLOCKSCOUT_PRO_BASE = "https://api.blockscout.com/8453";
-
+const BLOCKSCOUT_API = "https://base.blockscout.com/api";
 const TOP_LIMIT = 100;
-const MAX_PAGES = 100;
 
 type BlockscoutLog = {
-  data?: string;
+  address?: string;
   topics?: string[];
-  block_number?: number;
-  index?: number;
+  data?: string;
+  blockNumber?: string;
+  logIndex?: string;
+  transactionHash?: string;
 };
 
-type BlockscoutPage = {
-  items?: BlockscoutLog[];
-  next_page_params?: {
-    block_number?: number;
-    index?: number;
-    items_count?: number;
-  } | null;
+type BlockscoutResponse = {
+  status?: string;
+  message?: string;
+  result?: BlockscoutLog[] | string;
 };
 
 type PlayerState = {
@@ -38,18 +36,23 @@ type PlayerState = {
   streak: number;
   lastGMDay: number;
   lastBlock: number;
+  lastLogIndex: number;
 };
 
-function normalizeAddress(address: string) {
-  return address.toLowerCase();
+function normalize(value: string) {
+  return value.toLowerCase();
 }
 
-function toSafeNumber(value: bigint) {
-  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+function hexToSafeNumber(value: string | undefined) {
+  if (!value) return 0;
+
+  const parsed = BigInt(value);
+
+  if (parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new Error("Onchain value exceeded JavaScript safe integer range.");
   }
 
-  return Number(value);
+  return Number(parsed);
 }
 
 function parseUint256Word(data: string, wordIndex: number) {
@@ -61,7 +64,7 @@ function parseUint256Word(data: string, wordIndex: number) {
     throw new Error("Unexpected GM event data length.");
   }
 
-  return BigInt(`0x${word}`);
+  return hexToSafeNumber(`0x${word}`);
 }
 
 function parseIndexedAddress(topic: string) {
@@ -74,54 +77,17 @@ function parseIndexedAddress(topic: string) {
   return `0x${hex.slice(24)}` as Address;
 }
 
-function getBlockscoutBaseUrl() {
-  return process.env.BLOCKSCOUT_API_KEY
-    ? BLOCKSCOUT_PRO_BASE
-    : BLOCKSCOUT_PUBLIC_BASE;
-}
+async function fetchGMLogs() {
+  const url = new URL(BLOCKSCOUT_API);
 
-function buildLogsUrl(
-  nextPage:
-    | {
-        block_number?: number;
-        index?: number;
-        items_count?: number;
-      }
-    | null
-) {
-  const url = new URL(
-    `${getBlockscoutBaseUrl()}/api/v2/addresses/${GM_CONTRACT}/logs`
-  );
+  url.searchParams.set("module", "logs");
+  url.searchParams.set("action", "getLogs");
+  url.searchParams.set("fromBlock", String(DEPLOYMENT_BLOCK));
+  url.searchParams.set("toBlock", "latest");
+  url.searchParams.set("address", GM_CONTRACT);
+  url.searchParams.set("topic0", GM_EVENT_TOPIC);
 
-  if (process.env.BLOCKSCOUT_API_KEY) {
-    url.searchParams.set("apikey", process.env.BLOCKSCOUT_API_KEY);
-  }
-
-  if (nextPage?.block_number !== undefined) {
-    url.searchParams.set("block_number", String(nextPage.block_number));
-  }
-
-  if (nextPage?.index !== undefined) {
-    url.searchParams.set("index", String(nextPage.index));
-  }
-
-  if (nextPage?.items_count !== undefined) {
-    url.searchParams.set("items_count", String(nextPage.items_count));
-  }
-
-  return url.toString();
-}
-
-async function fetchBlockscoutPage(
-  nextPage:
-    | {
-        block_number?: number;
-        index?: number;
-        items_count?: number;
-      }
-    | null
-) {
-  const response = await fetch(buildLogsUrl(nextPage), {
+  const response = await fetch(url.toString(), {
     headers: {
       Accept: "application/json",
     },
@@ -130,96 +96,104 @@ async function fetchBlockscoutPage(
     },
   });
 
-  if (!response.ok) {
-    const body = await response.text();
+  const text = await response.text();
 
+  if (!response.ok) {
     throw new Error(
-      `Blockscout request failed (${response.status}): ${body.slice(0, 300)}`
+      `Blockscout Logs API failed (${response.status}): ${text.slice(0, 300)}`
     );
   }
 
-  return (await response.json()) as BlockscoutPage;
+  let payload: BlockscoutResponse;
+
+  try {
+    payload = JSON.parse(text) as BlockscoutResponse;
+  } catch {
+    throw new Error(
+      `Blockscout Logs API returned invalid JSON: ${text.slice(0, 300)}`
+    );
+  }
+
+  if (!Array.isArray(payload.result)) {
+    // Blockscout/Etherscan-compatible APIs can use status=0 for a valid
+    // "no records found" response.
+    const resultText =
+      typeof payload.result === "string" ? payload.result : "";
+
+    const noRecords =
+      payload.status === "0" &&
+      /no (records|logs|transactions) found/i.test(
+        `${payload.message ?? ""} ${resultText}`
+      );
+
+    if (noRecords) return [];
+
+    throw new Error(
+      `Blockscout Logs API error: ${
+        resultText || payload.message || "Unknown response"
+      }`
+    );
+  }
+
+  return payload.result;
 }
 
-async function buildLeaderboardFromBlockscout() {
+async function buildLeaderboard() {
+  const logs = await fetchGMLogs();
   const players = new Map<string, PlayerState>();
 
-  let nextPage:
-    | {
-        block_number?: number;
-        index?: number;
-        items_count?: number;
-      }
-    | null = null;
-
-  let pageCount = 0;
   let highestBlock = 0;
 
-  do {
-    pageCount += 1;
+  for (const log of logs) {
+    if (!log.topics || log.topics.length < 2 || !log.data) continue;
 
-    if (pageCount > MAX_PAGES) {
-      throw new Error(
-        `Blockscout pagination exceeded ${MAX_PAGES} pages.`
-      );
-    }
+    if (normalize(log.topics[0]) !== GM_EVENT_TOPIC) continue;
 
-    const page = await fetchBlockscoutPage(nextPage);
+    try {
+      const user = parseIndexedAddress(log.topics[1]);
+      const day = parseUint256Word(log.data, 0);
+      const totalGM = parseUint256Word(log.data, 1);
+      const currentStreak = parseUint256Word(log.data, 2);
+      const blockNumber = hexToSafeNumber(log.blockNumber);
+      const logIndex = hexToSafeNumber(log.logIndex);
 
-    for (const log of page.items ?? []) {
-      if (!log.topics || log.topics.length < 2 || !log.data) {
+      highestBlock = Math.max(highestBlock, blockNumber);
+
+      const key = normalize(user);
+      const existing = players.get(key);
+
+      if (
+        existing &&
+        (existing.lastBlock > blockNumber ||
+          (existing.lastBlock === blockNumber &&
+            existing.lastLogIndex >= logIndex))
+      ) {
         continue;
       }
 
-      if (normalizeAddress(log.topics[0]) !== GM_EVENT_TOPIC) {
-        continue;
-      }
-
-      try {
-        const user = parseIndexedAddress(log.topics[1]);
-        const day = toSafeNumber(parseUint256Word(log.data, 0));
-        const totalGM = toSafeNumber(parseUint256Word(log.data, 1));
-        const currentStreak = toSafeNumber(parseUint256Word(log.data, 2));
-        const blockNumber = log.block_number ?? 0;
-
-        highestBlock = Math.max(highestBlock, blockNumber);
-
-        const key = normalizeAddress(user);
-        const existing = players.get(key);
-
-        // Blockscout returns newest logs first, but this comparison also keeps
-        // the code correct if ordering changes.
-        if (existing && existing.lastBlock >= blockNumber) {
-          continue;
-        }
-
-        players.set(key, {
-          address: user,
-          totalGM,
-          streak: currentStreak,
-          lastGMDay: day,
-          lastBlock: blockNumber,
-        });
-      } catch (error) {
-        console.warn("Skipping an undecodable GM event:", error);
-      }
+      players.set(key, {
+        address: user,
+        totalGM,
+        streak: currentStreak,
+        lastGMDay: day,
+        lastBlock: blockNumber,
+        lastLogIndex: logIndex,
+      });
+    } catch (error) {
+      console.warn("Skipping an undecodable GM event:", error);
     }
-
-    nextPage = page.next_page_params ?? null;
-  } while (nextPage);
+  }
 
   return {
     players,
     highestBlock,
-    pageCount,
+    eventCount: logs.length,
   };
 }
 
 export async function GET() {
   try {
-    const { players, highestBlock, pageCount } =
-      await buildLeaderboardFromBlockscout();
-
+    const { players, highestBlock, eventCount } = await buildLeaderboard();
     const today = Math.floor(Date.now() / 86_400_000);
 
     const allPlayers = [...players.values()].map((player) => {
@@ -266,13 +240,12 @@ export async function GET() {
       {
         chainId: 8453,
         contract: GM_CONTRACT,
+        deploymentBlock: DEPLOYMENT_BLOCK,
         indexedToBlock: highestBlock,
         utcDay: today,
         generatedAt: new Date().toISOString(),
-        dataSource: process.env.BLOCKSCOUT_API_KEY
-          ? "Blockscout PRO API"
-          : "Base Blockscout public REST API",
-        pagesFetched: pageCount,
+        dataSource: "Base Blockscout Logs API",
+        eventCount,
         playerCount: allPlayers.length,
         todayCount: todayPlayers.length,
         leaderboards: {
