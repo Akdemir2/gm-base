@@ -1029,7 +1029,7 @@ export default function Home() {
     }
   }
 
-  function shareOnX() {
+  async function shareOnX() {
     if (typeof window === "undefined") return;
 
     const streakText = `${walletProgress.streak} ${
@@ -1057,10 +1057,26 @@ export default function Home() {
       shareText
     )}`;
 
-    const opened = window.open(shareUrl, "_blank", "noopener,noreferrer");
+    if (isFarcasterMiniApp) {
+      try {
+        await sdk.actions.openUrl({ url: shareUrl });
+        return;
+      } catch (err) {
+        console.info(
+          "Farcaster openUrl unavailable; falling back to browser open:",
+          err
+        );
+      }
+    }
+
+    const opened = window.open(
+      shareUrl,
+      "_blank",
+      "noopener,noreferrer"
+    );
 
     if (!opened) {
-      window.location.href = shareUrl;
+      window.location.assign(shareUrl);
     }
   }
 
