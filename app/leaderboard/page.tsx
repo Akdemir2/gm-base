@@ -180,13 +180,14 @@ export default function LeaderboardPage() {
     };
 
     const setAddressFromAccounts = (accounts: unknown) => {
-      if (cancelled) return;
+      if (cancelled) return false;
 
       if (Array.isArray(accounts) && typeof accounts[0] === "string") {
         setViewerAddress(accounts[0].toLowerCase());
-      } else {
-        setViewerAddress(null);
+        return true;
       }
+
+      return false;
     };
 
     const attachProvider = async (
@@ -205,7 +206,37 @@ export default function LeaderboardPage() {
           }));
         }
 
-        setAddressFromAccounts(accounts);
+        const found = setAddressFromAccounts(accounts);
+
+        const handleAccountsChanged = (...args: unknown[]) => {
+          const changedAccounts = args[0];
+
+          if (!cancelled) {
+            setWalletDebug((current) => ({
+              ...current,
+              ...(source === "farcaster"
+                ? { farcasterAccounts: formatAccounts(changedAccounts) }
+                : { browserAccounts: formatAccounts(changedAccounts) }),
+            }));
+          }
+
+          if (
+            Array.isArray(changedAccounts) &&
+            typeof changedAccounts[0] === "string"
+          ) {
+            setViewerAddress(changedAccounts[0].toLowerCase());
+          } else if (source === "browser") {
+            setViewerAddress(null);
+          }
+        };
+
+        provider.on?.("accountsChanged", handleAccountsChanged);
+
+        cleanup = () => {
+          provider.removeListener?.("accountsChanged", handleAccountsChanged);
+        };
+
+        return found;
       } catch (error) {
         if (!cancelled) {
           setWalletDebug((current) => ({
@@ -216,72 +247,93 @@ export default function LeaderboardPage() {
             error:
               error instanceof Error ? error.message : String(error),
           }));
-          setViewerAddress(null);
         }
+
+        return false;
       }
+    };
 
-      const handleAccountsChanged = (...args: unknown[]) => {
-        const accounts = args[0];
-
-        if (!cancelled) {
-          setWalletDebug((current) => ({
-            ...current,
-            ...(source === "farcaster"
-              ? { farcasterAccounts: formatAccounts(accounts) }
-              : { browserAccounts: formatAccounts(accounts) }),
-          }));
-        }
-
-        setAddressFromAccounts(accounts);
-      };
-
-      provider.on?.("accountsChanged", handleAccountsChanged);
-
-      cleanup = () => {
-        provider.removeListener?.("accountsChanged", handleAccountsChanged);
-      };
+    const withTimeout = async <T,>(
+      promise: Promise<T>,
+      ms: number
+    ): Promise<T | null> => {
+      return await Promise.race([
+        promise,
+        new Promise<null>((resolve) =>
+          window.setTimeout(() => resolve(null), ms)
+        ),
+      ]);
     };
 
     const resolveViewerWallet = async () => {
+      // Keep isInMiniApp() only as diagnostic information. Some Farcaster
+      // WebView contexts can report false even though the native wallet
+      // provider is available.
       try {
-        const inMiniApp = await sdk.isInMiniApp();
+        const inMiniApp = await withTimeout(sdk.isInMiniApp(), 800);
 
         if (!cancelled) {
           setWalletDebug((current) => ({
             ...current,
-            miniApp: String(inMiniApp),
+            miniApp: inMiniApp === null ? "timeout" : String(inMiniApp),
           }));
-        }
-
-        if (inMiniApp) {
-          const farcasterProvider = await sdk.wallet.getEthereumProvider();
-
-          if (!cancelled) {
-            setWalletDebug((current) => ({
-              ...current,
-              farcasterProvider: farcasterProvider ? "available" : "null",
-            }));
-          }
-
-          if (farcasterProvider) {
-            await attachProvider(
-              farcasterProvider as unknown as WalletProvider,
-              "farcaster"
-            );
-            return;
-          }
         }
       } catch (error) {
         if (!cancelled) {
           setWalletDebug((current) => ({
             ...current,
+            miniApp: "error",
             error:
               error instanceof Error ? error.message : String(error),
           }));
         }
-        // Fall through to the browser wallet.
       }
 
+      // Try the Farcaster native wallet even when isInMiniApp() is false.
+      // Guard it with a short timeout so normal web/Base App contexts cannot
+      // hang on the SDK call.
+      try {
+        if (!cancelled) {
+          setWalletDebug((current) => ({
+            ...current,
+            farcasterProvider: "checking",
+          }));
+        }
+
+        const farcasterProvider = await withTimeout(
+          sdk.wallet.getEthereumProvider(),
+          1200
+        );
+
+        if (!cancelled) {
+          setWalletDebug((current) => ({
+            ...current,
+            farcasterProvider: farcasterProvider
+              ? "available"
+              : "unavailable",
+          }));
+        }
+
+        if (farcasterProvider) {
+          const found = await attachProvider(
+            farcasterProvider as unknown as WalletProvider,
+            "farcaster"
+          );
+
+          if (found) return;
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setWalletDebug((current) => ({
+            ...current,
+            farcasterProvider: "error",
+            error:
+              error instanceof Error ? error.message : String(error),
+          }));
+        }
+      }
+
+      // Fallback for normal browser / Base App injected wallets.
       const browserProvider = (
         window as typeof window & {
           ethereum?: {
@@ -309,10 +361,16 @@ export default function LeaderboardPage() {
       }
 
       if (browserProvider) {
-        await attachProvider(
+        const found = await attachProvider(
           browserProvider as unknown as WalletProvider,
           "browser"
         );
+
+        if (!found && !cancelled) {
+          setViewerAddress(null);
+        }
+      } else if (!cancelled) {
+        setViewerAddress(null);
       }
     };
 
