@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { sdk } from "@farcaster/miniapp-sdk";
 
 type Tab = "streak" | "totalGM" | "today";
 
@@ -136,6 +137,25 @@ export default function LeaderboardPage() {
     if (!data) return [];
     return data.leaderboards[activeTab];
   }, [activeTab, data]);
+
+  const openFarcasterProfile = useCallback(
+    async (event: React.MouseEvent<HTMLAnchorElement>, username: string) => {
+      const url = farcasterProfileUrl(username);
+
+      try {
+        const inMiniApp = await sdk.isInMiniApp();
+
+        if (inMiniApp) {
+          event.preventDefault();
+          await sdk.actions.openUrl({ url });
+        }
+      } catch (error) {
+        console.warn("Native Farcaster profile navigation failed:", error);
+        // Keep the normal anchor behavior as the fallback.
+      }
+    },
+    []
+  );
 
   return (
     <main className="min-h-screen bg-black text-white">
@@ -311,6 +331,9 @@ export default function LeaderboardPage() {
                           rel="noreferrer"
                           aria-label={`Open @${profile.username} on Farcaster`}
                           title={`Open @${profile.username} on Farcaster`}
+                          onClick={(event) =>
+                            void openFarcasterProfile(event, profile.username)
+                          }
                           className="group flex min-w-0 flex-1 items-center gap-3"
                         >
                           <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-800 bg-black font-mono text-xs text-gray-500 transition group-hover:border-gray-700">
