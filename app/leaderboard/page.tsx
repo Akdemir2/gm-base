@@ -110,6 +110,9 @@ export default function LeaderboardPage() {
   const [viewerRanks, setViewerRanks] = useState<
     LeaderboardResponse["viewerRanks"] | null
   >(null);
+  const [viewerRankDebug, setViewerRankDebug] = useState<
+    "idle" | "loading" | "completed" | "error"
+  >("idle");
 
   const loadLeaderboard = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -239,8 +242,11 @@ export default function LeaderboardPage() {
     const loadViewerRanks = async () => {
       if (!viewerAddress) {
         setViewerRanks(null);
+        setViewerRankDebug("idle");
         return;
       }
+
+      setViewerRankDebug("loading");
 
       try {
         const response = await fetch(
@@ -261,10 +267,12 @@ export default function LeaderboardPage() {
         }
 
         setViewerRanks(payload.viewerRanks ?? null);
+        setViewerRankDebug("completed");
       } catch (error) {
         if (!cancelled) {
           console.warn("Could not load viewer rank:", error);
           setViewerRanks(null);
+          setViewerRankDebug("error");
         }
       }
     };
@@ -419,8 +427,17 @@ export default function LeaderboardPage() {
 
           {rankTestMode && (
             <div className="mt-5 rounded-2xl border border-dashed border-gray-800 bg-gray-950/60 px-4 py-3 text-[11px] leading-5 text-gray-500">
-              Rank test mode is active. Your connected wallet is temporarily hidden
-              from the visible list so the “Your rank” fallback card can be tested.
+              <p>
+                Rank test mode is active. Your connected wallet is temporarily hidden
+                from the visible list so the “Your rank” fallback card can be tested.
+              </p>
+              <div className="mt-3 border-t border-gray-800 pt-3 font-mono text-[10px] leading-5">
+                <div>Detected wallet: <span className="text-gray-300">{viewerAddress ?? "none"}</span></div>
+                <div>Viewer request: <span className="text-gray-300">{viewerRankDebug}</span></div>
+                <div>Streak rank: <span className="text-gray-300">{viewerRanks?.streak?.rank ? `#${viewerRanks.streak.rank}` : "null"}</span></div>
+                <div>Total GM rank: <span className="text-gray-300">{viewerRanks?.totalGM?.rank ? `#${viewerRanks.totalGM.rank}` : "null"}</span></div>
+                <div>Today rank: <span className="text-gray-300">{viewerRanks?.today?.rank ? `#${viewerRanks.today.rank}` : "null"}</span></div>
+              </div>
             </div>
           )}
 
