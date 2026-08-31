@@ -113,6 +113,14 @@ export default function LeaderboardPage() {
   const [viewerRankDebug, setViewerRankDebug] = useState<
     "idle" | "loading" | "completed" | "error"
   >("idle");
+  const [walletDebug, setWalletDebug] = useState({
+    miniApp: "checking",
+    farcasterProvider: "not checked",
+    farcasterAccounts: "not checked",
+    browserProvider: "not checked",
+    browserAccounts: "not checked",
+    error: "none",
+  });
 
   const loadLeaderboard = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -161,6 +169,16 @@ export default function LeaderboardPage() {
     let cleanup: (() => void) | undefined;
     let cancelled = false;
 
+    const formatAccounts = (accounts: unknown) => {
+      if (!Array.isArray(accounts)) return String(accounts);
+      if (accounts.length === 0) return "[]";
+      return accounts
+        .map((account) =>
+          typeof account === "string" ? account.toLowerCase() : String(account)
+        )
+        .join(", ");
+    };
+
     const setAddressFromAccounts = (accounts: unknown) => {
       if (cancelled) return;
 
@@ -171,16 +189,50 @@ export default function LeaderboardPage() {
       }
     };
 
-    const attachProvider = async (provider: WalletProvider) => {
+    const attachProvider = async (
+      provider: WalletProvider,
+      source: "farcaster" | "browser"
+    ) => {
       try {
         const accounts = await provider.request({ method: "eth_accounts" });
+
+        if (!cancelled) {
+          setWalletDebug((current) => ({
+            ...current,
+            ...(source === "farcaster"
+              ? { farcasterAccounts: formatAccounts(accounts) }
+              : { browserAccounts: formatAccounts(accounts) }),
+          }));
+        }
+
         setAddressFromAccounts(accounts);
-      } catch {
-        setViewerAddress(null);
+      } catch (error) {
+        if (!cancelled) {
+          setWalletDebug((current) => ({
+            ...current,
+            ...(source === "farcaster"
+              ? { farcasterAccounts: "ERROR" }
+              : { browserAccounts: "ERROR" }),
+            error:
+              error instanceof Error ? error.message : String(error),
+          }));
+          setViewerAddress(null);
+        }
       }
 
       const handleAccountsChanged = (...args: unknown[]) => {
-        setAddressFromAccounts(args[0]);
+        const accounts = args[0];
+
+        if (!cancelled) {
+          setWalletDebug((current) => ({
+            ...current,
+            ...(source === "farcaster"
+              ? { farcasterAccounts: formatAccounts(accounts) }
+              : { browserAccounts: formatAccounts(accounts) }),
+          }));
+        }
+
+        setAddressFromAccounts(accounts);
       };
 
       provider.on?.("accountsChanged", handleAccountsChanged);
@@ -192,15 +244,41 @@ export default function LeaderboardPage() {
 
     const resolveViewerWallet = async () => {
       try {
-        if (await sdk.isInMiniApp()) {
+        const inMiniApp = await sdk.isInMiniApp();
+
+        if (!cancelled) {
+          setWalletDebug((current) => ({
+            ...current,
+            miniApp: String(inMiniApp),
+          }));
+        }
+
+        if (inMiniApp) {
           const farcasterProvider = await sdk.wallet.getEthereumProvider();
 
+          if (!cancelled) {
+            setWalletDebug((current) => ({
+              ...current,
+              farcasterProvider: farcasterProvider ? "available" : "null",
+            }));
+          }
+
           if (farcasterProvider) {
-            await attachProvider(farcasterProvider as unknown as WalletProvider);
+            await attachProvider(
+              farcasterProvider as unknown as WalletProvider,
+              "farcaster"
+            );
             return;
           }
         }
-      } catch {
+      } catch (error) {
+        if (!cancelled) {
+          setWalletDebug((current) => ({
+            ...current,
+            error:
+              error instanceof Error ? error.message : String(error),
+          }));
+        }
         // Fall through to the browser wallet.
       }
 
@@ -223,8 +301,18 @@ export default function LeaderboardPage() {
         }
       ).ethereum;
 
+      if (!cancelled) {
+        setWalletDebug((current) => ({
+          ...current,
+          browserProvider: browserProvider ? "available" : "missing",
+        }));
+      }
+
       if (browserProvider) {
-        await attachProvider(browserProvider as unknown as WalletProvider);
+        await attachProvider(
+          browserProvider as unknown as WalletProvider,
+          "browser"
+        );
       }
     };
 
@@ -433,6 +521,12 @@ export default function LeaderboardPage() {
               </p>
               <div className="mt-3 border-t border-gray-800 pt-3 font-mono text-[10px] leading-5">
                 <div>Detected wallet: <span className="text-gray-300">{viewerAddress ?? "none"}</span></div>
+                <div>Mini App: <span className="text-gray-300">{walletDebug.miniApp}</span></div>
+                <div>Farcaster provider: <span className="text-gray-300">{walletDebug.farcasterProvider}</span></div>
+                <div className="break-all">Farcaster eth_accounts: <span className="text-gray-300">{walletDebug.farcasterAccounts}</span></div>
+                <div>Browser provider: <span className="text-gray-300">{walletDebug.browserProvider}</span></div>
+                <div className="break-all">Browser eth_accounts: <span className="text-gray-300">{walletDebug.browserAccounts}</span></div>
+                <div className="break-all">Wallet error: <span className="text-gray-300">{walletDebug.error}</span></div>
                 <div>Viewer request: <span className="text-gray-300">{viewerRankDebug}</span></div>
                 <div>Streak rank: <span className="text-gray-300">{viewerRanks?.streak?.rank ? `#${viewerRanks.streak.rank}` : "null"}</span></div>
                 <div>Total GM rank: <span className="text-gray-300">{viewerRanks?.totalGM?.rank ? `#${viewerRanks.totalGM.rank}` : "null"}</span></div>
