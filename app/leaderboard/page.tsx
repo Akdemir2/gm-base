@@ -79,6 +79,14 @@ function fallbackAvatarLabel(player: LeaderboardPlayer) {
   return player.address.slice(2, 4).toUpperCase();
 }
 
+function farcasterProfileUrl(username: string) {
+  return `https://farcaster.xyz/${encodeURIComponent(username)}`;
+}
+
+function baseScanAddressUrl(address: string) {
+  return `https://basescan.org/address/${address}`;
+}
+
 export default function LeaderboardPage() {
   const [activeTab, setActiveTab] = useState<Tab>("streak");
   const [data, setData] = useState<LeaderboardResponse | null>(null);
@@ -288,73 +296,88 @@ export default function LeaderboardPage() {
                   const profile = player.farcaster;
 
                   return (
-                    <a
+                    <div
                       key={`${activeTab}-${player.address}`}
-                      href={`https://basescan.org/address/${player.address}`}
-                      target="_blank"
-                      rel="noreferrer"
                       className="flex items-center gap-3 px-4 py-4 transition hover:bg-gray-950"
                     >
                       <div className="flex w-9 shrink-0 items-center justify-center text-sm font-bold text-gray-500">
                         {rankIcon(rank)}
                       </div>
 
-                      <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-800 bg-black font-mono text-xs text-gray-500">
-                        <span>{fallbackAvatarLabel(player)}</span>
+                      {profile ? (
+                        <a
+                          href={farcasterProfileUrl(profile.username)}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`Open @${profile.username} on Farcaster`}
+                          title={`Open @${profile.username} on Farcaster`}
+                          className="group flex min-w-0 flex-1 items-center gap-3"
+                        >
+                          <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-800 bg-black font-mono text-xs text-gray-500 transition group-hover:border-gray-700">
+                            <span>{fallbackAvatarLabel(player)}</span>
 
-                        {profile?.pfpUrl && (
-                          <img
-                            src={profile.pfpUrl}
-                            alt={`${profile.displayName || profile.username} avatar`}
-                            className="absolute inset-0 h-full w-full object-cover"
-                            loading="lazy"
-                            referrerPolicy="no-referrer"
-                            onError={(event) => {
-                              event.currentTarget.style.display = "none";
-                            }}
-                          />
-                        )}
-                      </div>
+                            {profile.pfpUrl && (
+                              <img
+                                src={profile.pfpUrl}
+                                alt={`${profile.displayName || profile.username} avatar`}
+                                className="absolute inset-0 h-full w-full object-cover"
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                onError={(event) => {
+                                  event.currentTarget.style.display = "none";
+                                }}
+                              />
+                            )}
+                          </div>
 
-                      <div className="min-w-0 flex-1">
-                        {profile ? (
-                          <>
+                          <div className="min-w-0 flex-1">
                             <p
-                              className="truncate text-sm font-semibold text-gray-200"
+                              className="truncate text-sm font-semibold text-gray-200 transition group-hover:text-white"
                               title={profile.displayName}
                             >
                               @{profile.username}
                             </p>
-                            <p className="mt-0.5 truncate font-mono text-[10px] text-gray-600">
-                              {shortenAddress(player.address)}
-                            </p>
                             <p className="mt-0.5 truncate text-[10px] text-gray-700">
                               {secondaryForTab(player, activeTab)}
                             </p>
-                          </>
-                        ) : (
-                          <>
-                            <p className="truncate font-mono text-sm font-medium text-gray-300">
-                              {shortenAddress(player.address)}
-                            </p>
-                            <p className="mt-1 text-[11px] text-gray-700">
+                          </div>
+                        </a>
+                      ) : (
+                        <div className="flex min-w-0 flex-1 items-center gap-3">
+                          <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-800 bg-black font-mono text-xs text-gray-500">
+                            <span>{fallbackAvatarLabel(player)}</span>
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[10px] text-gray-700">
                               {secondaryForTab(player, activeTab)}
                             </p>
-                          </>
-                        )}
-                      </div>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="shrink-0 text-right">
                         <p className="text-sm font-bold text-white">
                           {valueForTab(player, activeTab)}
                         </p>
+
                         {player.gmToday && activeTab !== "today" && (
                           <p className="mt-1 text-[10px] font-medium text-green-500">
                             GM today ✓
                           </p>
                         )}
+
+                        <a
+                          href={baseScanAddressUrl(player.address)}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Open wallet on BaseScan"
+                          className="mt-1 block font-mono text-[10px] text-gray-600 transition hover:text-gray-300"
+                        >
+                          {shortenAddress(player.address)}
+                        </a>
                       </div>
-                    </a>
+                    </div>
                   );
                 })}
               </div>
