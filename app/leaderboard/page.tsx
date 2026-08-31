@@ -4,6 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Tab = "streak" | "totalGM" | "today";
 
+type FarcasterProfile = {
+  fid: number;
+  username: string;
+  displayName: string;
+  pfpUrl: string;
+};
+
 type LeaderboardPlayer = {
   address: string;
   totalGM: number;
@@ -11,6 +18,7 @@ type LeaderboardPlayer = {
   recordedStreak: number;
   lastGMDay: number;
   gmToday: boolean;
+  farcaster: FarcasterProfile | null;
 };
 
 type LeaderboardResponse = {
@@ -22,6 +30,7 @@ type LeaderboardResponse = {
   generatedAt: string;
   playerCount: number;
   todayCount: number;
+  farcasterProfileCount?: number;
   leaderboards: {
     streak: LeaderboardPlayer[];
     totalGM: LeaderboardPlayer[];
@@ -51,10 +60,6 @@ function valueForTab(player: LeaderboardPlayer, tab: Tab) {
     return `${player.totalGM} ${player.totalGM === 1 ? "GM" : "GMs"}`;
   }
 
-  if (tab === "today") {
-    return `${player.streak} ${player.streak === 1 ? "day" : "days"}`;
-  }
-
   return `${player.streak} ${player.streak === 1 ? "day" : "days"}`;
 }
 
@@ -63,11 +68,15 @@ function secondaryForTab(player: LeaderboardPlayer, tab: Tab) {
     return `${player.streak} day streak`;
   }
 
-  if (tab === "today") {
-    return `${player.totalGM} total ${player.totalGM === 1 ? "GM" : "GMs"}`;
+  return `${player.totalGM} total ${player.totalGM === 1 ? "GM" : "GMs"}`;
+}
+
+function fallbackAvatarLabel(player: LeaderboardPlayer) {
+  if (player.farcaster?.username) {
+    return player.farcaster.username.slice(0, 2).toUpperCase();
   }
 
-  return `${player.totalGM} total ${player.totalGM === 1 ? "GM" : "GMs"}`;
+  return player.address.slice(2, 4).toUpperCase();
 }
 
 export default function LeaderboardPage() {
@@ -244,7 +253,7 @@ export default function LeaderboardPage() {
                 {[1, 2, 3, 4, 5].map((item) => (
                   <div
                     key={item}
-                    className="h-[72px] animate-pulse rounded-2xl border border-gray-900 bg-gray-950"
+                    className="h-[76px] animate-pulse rounded-2xl border border-gray-900 bg-gray-950"
                   />
                 ))}
               </div>
@@ -276,6 +285,7 @@ export default function LeaderboardPage() {
               <div className="divide-y divide-gray-900">
                 {players.map((player, index) => {
                   const rank = index + 1;
+                  const profile = player.farcaster;
 
                   return (
                     <a
@@ -289,17 +299,49 @@ export default function LeaderboardPage() {
                         {rankIcon(rank)}
                       </div>
 
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-800 bg-black font-mono text-xs text-gray-500">
-                        {player.address.slice(2, 4).toUpperCase()}
+                      <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-800 bg-black font-mono text-xs text-gray-500">
+                        <span>{fallbackAvatarLabel(player)}</span>
+
+                        {profile?.pfpUrl && (
+                          <img
+                            src={profile.pfpUrl}
+                            alt={`${profile.displayName || profile.username} avatar`}
+                            className="absolute inset-0 h-full w-full object-cover"
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none";
+                            }}
+                          />
+                        )}
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-mono text-sm font-medium text-gray-300">
-                          {shortenAddress(player.address)}
-                        </p>
-                        <p className="mt-1 text-[11px] text-gray-700">
-                          {secondaryForTab(player, activeTab)}
-                        </p>
+                        {profile ? (
+                          <>
+                            <p
+                              className="truncate text-sm font-semibold text-gray-200"
+                              title={profile.displayName}
+                            >
+                              @{profile.username}
+                            </p>
+                            <p className="mt-0.5 truncate font-mono text-[10px] text-gray-600">
+                              {shortenAddress(player.address)}
+                            </p>
+                            <p className="mt-0.5 truncate text-[10px] text-gray-700">
+                              {secondaryForTab(player, activeTab)}
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="truncate font-mono text-sm font-medium text-gray-300">
+                              {shortenAddress(player.address)}
+                            </p>
+                            <p className="mt-1 text-[11px] text-gray-700">
+                              {secondaryForTab(player, activeTab)}
+                            </p>
+                          </>
+                        )}
                       </div>
 
                       <div className="shrink-0 text-right">
@@ -321,7 +363,14 @@ export default function LeaderboardPage() {
 
           <div className="mt-5 rounded-2xl border border-gray-900 bg-gray-950/40 px-5 py-4">
             <div className="flex items-center justify-between gap-4 text-[11px] text-gray-700">
-              <span>Base Mainnet · Onchain data</span>
+              <span>
+                Base Mainnet · Onchain data
+                {data?.farcasterProfileCount
+                  ? ` · ${data.farcasterProfileCount} Farcaster ${
+                      data.farcasterProfileCount === 1 ? "profile" : "profiles"
+                    }`
+                  : ""}
+              </span>
               <span>{data ? `Block ${data.indexedToBlock}` : "Loading..."}</span>
             </div>
           </div>

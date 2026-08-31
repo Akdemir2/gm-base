@@ -14,6 +14,9 @@ const GM_EVENT_TOPIC =
   "0xe26dd3f3558e5fbd6a7b62e9eb1370f4660d01dca056ece3036cd21cd5d93ef6";
 
 const BLOCKSCOUT_API = "https://base.blockscout.com/api";
+const NEYNAR_BULK_BY_ADDRESS_API =
+  "https://api.neynar.com/v2/farcaster/user/bulk-by-address/";
+
 const TOP_LIMIT = 100;
 
 type BlockscoutLog = {
@@ -29,6 +32,23 @@ type BlockscoutResponse = {
   status?: string;
   message?: string;
   result?: BlockscoutLog[] | string;
+};
+
+type NeynarUser = {
+  fid?: number;
+  custody_address?: string;
+  username?: string;
+  display_name?: string;
+  pfp_url?: string;
+};
+
+type NeynarBulkResponse = Record<string, NeynarUser[]>;
+
+type FarcasterProfile = {
+  fid: number;
+  username: string;
+  displayName: string;
+  pfpUrl: string;
 };
 
 type PlayerState = {
@@ -137,6 +157,94 @@ async function fetchGMLogs() {
   return payload.result;
 }
 
+async function fetchFarcasterProfiles(addresses: Address[]) {
+  const profiles = new Map<string, FarcasterProfile>();
+  const apiKey = process.env.NEYNAR_API_KEY;
+
+  if (!apiKey || addresses.length === 0) {
+    return profiles;
+  }
+
+  // Neynar supports up to 350 addresses in one bulk request.
+  const uniqueAddresses = [...new Set(addresses.map(normalize))];
+
+  try {
+    const url = new URL(NEYNAR_BULK_BY_ADDRESS_API);
+    url.searchParams.set("addresses", uniqueAddresses.join(","));
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Accept: "application/json",
+        "x-api-key": apiKey,
+      },
+      next: {
+        revalidate: 300,
+      },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.warn(
+        `Neynar profile enrichment failed (${response.status}): ${text.slice(
+          0,
+          300
+        )}`
+      );
+      return profiles;
+    }
+
+    const payload = (await response.json()) as NeynarBulkResponse;
+
+    for (const address of uniqueAddresses) {
+      const users =
+        payload[address] ??
+        payload[
+          Object.keys(payload).find(
+            (key) => normalize(key) === address
+          ) ?? ""
+        ] ??
+        [];
+
+      if (!Array.isArray(users) || users.length === 0) {
+        continue;
+      }
+
+      // Prefer the Farcaster account whose custody address is the queried
+      // wallet. If the wallet is only a verified address, use the first match.
+      const user =
+        users.find(
+          (candidate) =>
+            candidate.custody_address &&
+            normalize(candidate.custody_address) === address
+        ) ?? users[0];
+
+      if (
+        typeof user.fid !== "number" ||
+        !user.username ||
+        typeof user.username !== "string"
+      ) {
+        continue;
+      }
+
+      profiles.set(address, {
+        fid: user.fid,
+        username: user.username,
+        displayName:
+          typeof user.display_name === "string" && user.display_name
+            ? user.display_name
+            : user.username,
+        pfpUrl:
+          typeof user.pfp_url === "string" ? user.pfp_url : "",
+      });
+    }
+  } catch (error) {
+    // Farcaster enrichment must never take the onchain leaderboard down.
+    console.warn("Neynar profile enrichment failed:", error);
+  }
+
+  return profiles;
+}
+
 async function buildLeaderboard() {
   const logs = await fetchGMLogs();
   const players = new Map<string, PlayerState>();
@@ -201,6 +309,10 @@ export async function GET() {
     const { players, highestBlock, eventCount } = await buildLeaderboard();
     const today = Math.floor(Date.now() / 86_400_000);
 
+    const farcasterProfiles = await fetchFarcasterProfiles(
+      [...players.values()].map((player) => player.address)
+    );
+
     const allPlayers = [...players.values()].map((player) => {
       const activeStreak =
         player.lastGMDay >= today - 1 ? player.streak : 0;
@@ -212,6 +324,7 @@ export async function GET() {
         recordedStreak: player.streak,
         lastGMDay: player.lastGMDay,
         gmToday: player.lastGMDay === today,
+        farcaster: farcasterProfiles.get(normalize(player.address)) ?? null,
       };
     });
 
@@ -250,9 +363,11 @@ export async function GET() {
         utcDay: today,
         generatedAt: new Date().toISOString(),
         dataSource: "Base Blockscout Logs API",
+        profileSource: apiProfileSource(),
         eventCount,
         playerCount: allPlayers.length,
         todayCount: todayPlayers.length,
+        farcasterProfileCount: farcasterProfiles.size,
         leaderboards: {
           streak,
           totalGM,
@@ -279,4 +394,8 @@ export async function GET() {
       { status: 500 }
     );
   }
+}
+
+function apiProfileSource() {
+  return process.env.NEYNAR_API_KEY ? "Neynar" : "disabled";
 }
