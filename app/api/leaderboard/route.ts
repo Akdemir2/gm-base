@@ -304,7 +304,7 @@ async function buildLeaderboard() {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { players, highestBlock, eventCount } = await buildLeaderboard();
     const today = Math.floor(Date.now() / 86_400_000);
@@ -328,31 +328,54 @@ export async function GET() {
       };
     });
 
-    const streak = [...allPlayers]
-      .sort(
-        (a, b) =>
-          b.streak - a.streak ||
-          b.totalGM - a.totalGM ||
-          b.lastGMDay - a.lastGMDay
-      )
-      .slice(0, TOP_LIMIT);
+    const streakAll = [...allPlayers].sort(
+      (a, b) =>
+        b.streak - a.streak ||
+        b.totalGM - a.totalGM ||
+        b.lastGMDay - a.lastGMDay
+    );
 
-    const totalGM = [...allPlayers]
-      .sort(
-        (a, b) =>
-          b.totalGM - a.totalGM ||
-          b.streak - a.streak ||
-          b.lastGMDay - a.lastGMDay
-      )
-      .slice(0, TOP_LIMIT);
+    const totalGMAll = [...allPlayers].sort(
+      (a, b) =>
+        b.totalGM - a.totalGM ||
+        b.streak - a.streak ||
+        b.lastGMDay - a.lastGMDay
+    );
 
-    const todayPlayers = allPlayers
+    const todayAll = allPlayers
       .filter((player) => player.gmToday)
       .sort(
         (a, b) =>
           b.streak - a.streak || b.totalGM - a.totalGM
-      )
-      .slice(0, TOP_LIMIT);
+      );
+
+    const streak = streakAll.slice(0, TOP_LIMIT);
+    const totalGM = totalGMAll.slice(0, TOP_LIMIT);
+    const todayPlayers = todayAll.slice(0, TOP_LIMIT);
+
+    const requestUrl = new URL(request.url);
+    const viewerParam = requestUrl.searchParams.get("viewer");
+    const viewerAddress =
+      viewerParam && /^0x[a-fA-F0-9]{40}$/.test(viewerParam)
+        ? normalize(viewerParam)
+        : null;
+
+    const viewerRankFor = (
+      rankedPlayers: typeof allPlayers
+    ) => {
+      if (!viewerAddress) return null;
+
+      const index = rankedPlayers.findIndex(
+        (player) => normalize(player.address) === viewerAddress
+      );
+
+      if (index < 0) return null;
+
+      return {
+        rank: index + 1,
+        player: rankedPlayers[index],
+      };
+    };
 
     return NextResponse.json(
       {
@@ -366,12 +389,17 @@ export async function GET() {
         profileSource: apiProfileSource(),
         eventCount,
         playerCount: allPlayers.length,
-        todayCount: todayPlayers.length,
+        todayCount: todayAll.length,
         farcasterProfileCount: farcasterProfiles.size,
         leaderboards: {
           streak,
           totalGM,
           today: todayPlayers,
+        },
+        viewerRanks: {
+          streak: viewerRankFor(streakAll),
+          totalGM: viewerRankFor(totalGMAll),
+          today: viewerRankFor(todayAll),
         },
       },
       {
