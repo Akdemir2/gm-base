@@ -218,6 +218,12 @@ function getHighestUnlockedMilestone(streak: number) {
     .find((milestone) => streak >= milestone.days);
 }
 
+function getExactStreakMilestone(streak: number) {
+  return STREAK_MILESTONES.find(
+    (milestone) => milestone.days === streak
+  );
+}
+
 export default function Home() {
   useEffect(() => {
     let cancelled = false;
@@ -275,6 +281,9 @@ export default function Home() {
     walletProgress.streak
   );
   const highestUnlockedMilestone = getHighestUnlockedMilestone(
+    walletProgress.streak
+  );
+  const exactUnlockedMilestone = getExactStreakMilestone(
     walletProgress.streak
   );
   const milestoneProgress = nextStreakMilestone
@@ -1071,6 +1080,76 @@ export default function Home() {
     }
   }
 
+  async function shareMilestoneOnFarcaster(
+    milestone: StreakMilestone
+  ) {
+    const shareText = [
+      `${milestone.icon} ${milestone.days} DAY GM STREAK UNLOCKED`,
+      "",
+      `${milestone.days} days in a row on Base.`,
+      "",
+      "One GM. Every day. Onchain.",
+      "",
+      "Send yours 👇",
+      APP_URL,
+    ].join("\n");
+
+    try {
+      await sdk.actions.composeCast({
+        text: shareText,
+        embeds: [APP_URL],
+      });
+    } catch (err) {
+      console.error("Farcaster milestone share failed:", err);
+      setError("Could not open Farcaster share.");
+    }
+  }
+
+  async function shareMilestoneOnX(
+    milestone: StreakMilestone
+  ) {
+    if (typeof window === "undefined") return;
+
+    const shareText = [
+      `${milestone.icon} ${milestone.days} DAY GM STREAK UNLOCKED`,
+      "",
+      `${milestone.days} days in a row on Base.`,
+      "",
+      "One GM. Every day. Onchain.",
+      "",
+      "Send yours 👇",
+      "",
+      APP_URL,
+      "@base",
+    ].join("\n");
+
+    const shareUrl = `https://x.com/intent/post?text=${encodeURIComponent(
+      shareText
+    )}`;
+
+    if (isFarcasterMiniApp) {
+      try {
+        await sdk.actions.openUrl({ url: shareUrl });
+        return;
+      } catch (err) {
+        console.info(
+          "Farcaster openUrl unavailable for milestone share:",
+          err
+        );
+      }
+    }
+
+    const opened = window.open(
+      shareUrl,
+      "_blank",
+      "noopener,noreferrer"
+    );
+
+    if (!opened) {
+      window.location.assign(shareUrl);
+    }
+  }
+
   async function shareOnX() {
     if (typeof window === "undefined") return;
 
@@ -1545,6 +1624,66 @@ export default function Home() {
                         >
                           Share on X ↗
                         </button>
+
+                    {exactUnlockedMilestone && (
+                      <div className="mt-5 rounded-[2rem] border border-yellow-900 bg-yellow-950/20 p-5 text-left">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-yellow-700">
+                              Milestone unlocked
+                            </p>
+                            <div className="mt-3 flex items-center gap-3">
+                              <span className="text-4xl">
+                                {exactUnlockedMilestone.icon}
+                              </span>
+                              <div>
+                                <h3 className="text-lg font-bold text-white">
+                                  {exactUnlockedMilestone.days} DAY STREAK
+                                </h3>
+                                <p className="mt-1 text-xs leading-5 text-gray-500">
+                                  {exactUnlockedMilestone.days} days in a row on Base.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <span className="rounded-full border border-yellow-900 px-3 py-1 text-[11px] font-medium text-yellow-500">
+                            Unlocked
+                          </span>
+                        </div>
+
+                        <p className="mt-4 text-xs leading-5 text-gray-500">
+                          One GM. Every day. Onchain. Share your streak milestone.
+                        </p>
+
+                        {isFarcasterMiniApp && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void shareMilestoneOnFarcaster(
+                                exactUnlockedMilestone
+                              )
+                            }
+                            className="mt-4 w-full rounded-2xl bg-[#8556D8] py-3.5 text-sm font-semibold text-white transition hover:opacity-90"
+                          >
+                            Share achievement on Farcaster ↗
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void shareMilestoneOnX(
+                              exactUnlockedMilestone
+                            )
+                          }
+                          className="mt-3 w-full rounded-2xl border border-gray-700 bg-black py-3.5 text-sm font-semibold text-white transition hover:border-gray-500 hover:bg-gray-900"
+                        >
+                          Share achievement on X ↗
+                        </button>
+                      </div>
+                    )}
+
                       </div>
                     )}
 
