@@ -39,6 +39,12 @@ type LeaderboardResponse = {
   };
 };
 
+type WalletProvider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  on?: (...args: unknown[]) => unknown;
+  removeListener?: (...args: unknown[]) => unknown;
+};
+
 const TABS: Array<{ id: Tab; icon: string; label: string }> = [
   { id: "streak", icon: "🔥", label: "Streak" },
   { id: "totalGM", icon: "👋", label: "Total GM" },
@@ -94,6 +100,7 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [viewerAddress, setViewerAddress] = useState<string | null>(null);
 
   const loadLeaderboard = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -132,6 +139,85 @@ export default function LeaderboardPage() {
   useEffect(() => {
     void loadLeaderboard();
   }, [loadLeaderboard]);
+
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    let cancelled = false;
+
+    const setAddressFromAccounts = (accounts: unknown) => {
+      if (cancelled) return;
+
+      if (Array.isArray(accounts) && typeof accounts[0] === "string") {
+        setViewerAddress(accounts[0].toLowerCase());
+      } else {
+        setViewerAddress(null);
+      }
+    };
+
+    const attachProvider = async (provider: WalletProvider) => {
+      try {
+        const accounts = await provider.request({ method: "eth_accounts" });
+        setAddressFromAccounts(accounts);
+      } catch {
+        setViewerAddress(null);
+      }
+
+      const handleAccountsChanged = (...args: unknown[]) => {
+        setAddressFromAccounts(args[0]);
+      };
+
+      provider.on?.("accountsChanged", handleAccountsChanged);
+
+      cleanup = () => {
+        provider.removeListener?.("accountsChanged", handleAccountsChanged);
+      };
+    };
+
+    const resolveViewerWallet = async () => {
+      try {
+        if (await sdk.isInMiniApp()) {
+          const farcasterProvider = await sdk.wallet.getEthereumProvider();
+
+          if (farcasterProvider) {
+            await attachProvider(farcasterProvider as unknown as WalletProvider);
+            return;
+          }
+        }
+      } catch {
+        // Fall through to the browser wallet.
+      }
+
+      const browserProvider = (
+        window as typeof window & {
+          ethereum?: {
+            request: (args: {
+              method: string;
+              params?: unknown[];
+            }) => Promise<unknown>;
+            on?: (
+              event: string,
+              listener: (...args: unknown[]) => void
+            ) => void;
+            removeListener?: (
+              event: string,
+              listener: (...args: unknown[]) => void
+            ) => void;
+          };
+        }
+      ).ethereum;
+
+      if (browserProvider) {
+        await attachProvider(browserProvider as unknown as WalletProvider);
+      }
+    };
+
+    void resolveViewerWallet();
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, []);
 
   const players = useMemo(() => {
     if (!data) return [];
@@ -314,11 +400,17 @@ export default function LeaderboardPage() {
                 {players.map((player, index) => {
                   const rank = index + 1;
                   const profile = player.farcaster;
+                  const isViewer =
+                    viewerAddress === player.address.toLowerCase();
 
                   return (
                     <div
                       key={`${activeTab}-${player.address}`}
-                      className="flex items-center gap-3 px-4 py-4 transition hover:bg-gray-950"
+                      className={`flex items-center gap-3 px-4 py-4 transition ${
+                        isViewer
+                          ? "bg-white/[0.045] ring-1 ring-inset ring-white/10"
+                          : "hover:bg-gray-950"
+                      }`}
                     >
                       <div className="flex w-9 shrink-0 items-center justify-center text-sm font-bold text-gray-500">
                         {rankIcon(rank)}
@@ -354,12 +446,20 @@ export default function LeaderboardPage() {
                           </div>
 
                           <div className="min-w-0 flex-1">
-                            <p
-                              className="truncate text-sm font-semibold text-gray-200 transition group-hover:text-white"
-                              title={profile.displayName}
-                            >
-                              @{profile.username}
-                            </p>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p
+                                className="truncate text-sm font-semibold text-gray-200 transition group-hover:text-white"
+                                title={profile.displayName}
+                              >
+                                @{profile.username}
+                              </p>
+
+                              {isViewer && (
+                                <span className="shrink-0 rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-white">
+                                  You
+                                </span>
+                              )}
+                            </div>
                             <p className="mt-0.5 truncate text-[10px] text-gray-700">
                               {secondaryForTab(player, activeTab)}
                             </p>
@@ -372,7 +472,13 @@ export default function LeaderboardPage() {
                           </div>
 
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-[10px] text-gray-700">
+                            {isViewer && (
+                              <span className="inline-flex rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-white">
+                                You
+                              </span>
+                            )}
+
+                            <p className={`${isViewer ? "mt-1" : ""} truncate text-[10px] text-gray-700`}>
                               {secondaryForTab(player, activeTab)}
                             </p>
                           </div>
