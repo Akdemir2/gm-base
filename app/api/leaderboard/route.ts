@@ -9,8 +9,9 @@ const GM_CONTRACT =
 
 const DEPLOYMENT_BLOCK = 50618203;
 
+// Verified from a real onchain GM log.
 const GM_EVENT_TOPIC =
-  "0xe260dd3f3558e5fbd6a7b62e9eb1370f4660d1dca056ece3036cd21cd5d93ef6";
+  "0xe26dd3f3558e5fbd6a7b62e9eb1370f4660d01dca056ece3036cd21cd5d93ef6";
 
 const BLOCKSCOUT_API = "https://base.blockscout.com/api";
 const TOP_LIMIT = 100;
@@ -115,8 +116,6 @@ async function fetchGMLogs() {
   }
 
   if (!Array.isArray(payload.result)) {
-    // Blockscout/Etherscan-compatible APIs can use status=0 for a valid
-    // "no records found" response.
     const resultText =
       typeof payload.result === "string" ? payload.result : "";
 
@@ -145,15 +144,21 @@ async function buildLeaderboard() {
   let highestBlock = 0;
 
   for (const log of logs) {
-    if (!log.topics || log.topics.length < 2 || !log.data) continue;
+    // Real GM event layout:
+    // topic0 = event signature
+    // topic1 = indexed user address
+    // topic2 = indexed UTC day
+    // data[0] = totalGM
+    // data[1] = currentStreak
+    if (!log.topics || log.topics.length < 3 || !log.data) continue;
 
     if (normalize(log.topics[0]) !== GM_EVENT_TOPIC) continue;
 
     try {
       const user = parseIndexedAddress(log.topics[1]);
-      const day = parseUint256Word(log.data, 0);
-      const totalGM = parseUint256Word(log.data, 1);
-      const currentStreak = parseUint256Word(log.data, 2);
+      const day = hexToSafeNumber(log.topics[2]);
+      const totalGM = parseUint256Word(log.data, 0);
+      const currentStreak = parseUint256Word(log.data, 1);
       const blockNumber = hexToSafeNumber(log.blockNumber);
       const logIndex = hexToSafeNumber(log.logIndex);
 
