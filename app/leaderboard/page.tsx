@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { sdk } from "@farcaster/miniapp-sdk";
 
 type Tab = "streak" | "totalGM" | "today";
@@ -107,28 +107,20 @@ export default function LeaderboardPage() {
   const [error, setError] = useState("");
   const [viewerAddress, setViewerAddress] = useState<string | null>(null);
   const [rankTestMode, setRankTestMode] = useState(false);
-  const requestSequence = useRef(0);
+  const [viewerRanks, setViewerRanks] = useState<
+    LeaderboardResponse["viewerRanks"] | null
+  >(null);
 
-  const loadLeaderboard = useCallback(
-    async (
-      manual = false,
-      address: string | null = null,
-      silent = false
-    ) => {
-      if (manual) setRefreshing(true);
-      else if (!silent) setLoading(true);
+  const loadLeaderboard = useCallback(async (manual = false) => {
+    if (manual) setRefreshing(true);
+    else setLoading(true);
 
-      setError("");
-      const requestId = ++requestSequence.current;
+    setError("");
 
-      try {
-        const viewerQuery = address
-          ? `?viewer=${encodeURIComponent(address)}`
-          : "";
-
-        const response = await fetch(`/api/leaderboard${viewerQuery}`, {
-          cache: "no-store",
-        });
+    try {
+      const response = await fetch("/api/leaderboard", {
+        cache: "no-store",
+      });
 
       const payload = (await response.json()) as
         | LeaderboardResponse
@@ -142,31 +134,19 @@ export default function LeaderboardPage() {
         );
       }
 
-      if (requestId !== requestSequence.current) {
-        return;
-      }
-
       setData(payload);
     } catch (err) {
-      if (requestId !== requestSequence.current) {
-        return;
-      }
-
       setError(
         err instanceof Error ? err.message : "Could not load leaderboard."
       );
-      } finally {
-        if (requestId === requestSequence.current) {
-          if (!silent) setLoading(false);
-          setRefreshing(false);
-        }
-      }
-    },
-    []
-  );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    void loadLeaderboard(false, null);
+    void loadLeaderboard();
   }, [loadLeaderboard]);
 
   useEffect(() => {
@@ -254,10 +234,47 @@ export default function LeaderboardPage() {
   }, []);
 
   useEffect(() => {
-    if (!viewerAddress) return;
+    let cancelled = false;
 
-    void loadLeaderboard(false, viewerAddress, true);
-  }, [viewerAddress, loadLeaderboard]);
+    const loadViewerRanks = async () => {
+      if (!viewerAddress) {
+        setViewerRanks(null);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/leaderboard?viewer=${encodeURIComponent(viewerAddress)}`,
+          { cache: "no-store" }
+        );
+
+        const payload = (await response.json()) as
+          | LeaderboardResponse
+          | { error?: string };
+
+        if (
+          cancelled ||
+          !response.ok ||
+          !("leaderboards" in payload)
+        ) {
+          return;
+        }
+
+        setViewerRanks(payload.viewerRanks ?? null);
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("Could not load viewer rank:", error);
+          setViewerRanks(null);
+        }
+      }
+    };
+
+    void loadViewerRanks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [viewerAddress]);
 
   const players = useMemo(() => {
     if (!data) return [];
@@ -273,7 +290,7 @@ export default function LeaderboardPage() {
     );
   }, [activeTab, data, rankTestMode, viewerAddress]);
 
-  const viewerRank = data?.viewerRanks?.[activeTab] ?? null;
+  const viewerRank = viewerRanks?.[activeTab] ?? null;
 
   const viewerIsVisible = useMemo(() => {
     if (!viewerAddress) return false;
@@ -425,7 +442,7 @@ export default function LeaderboardPage() {
 
               <button
                 type="button"
-                onClick={() => void loadLeaderboard(true, viewerAddress)}
+                onClick={() => void loadLeaderboard(true)}
                 disabled={refreshing}
                 className="rounded-xl border border-gray-800 px-3 py-2 text-[11px] font-medium text-gray-600 transition hover:border-gray-700 hover:text-white disabled:opacity-50"
               >
@@ -452,7 +469,7 @@ export default function LeaderboardPage() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => void loadLeaderboard(true, viewerAddress)}
+                  onClick={() => void loadLeaderboard(true)}
                   className="mt-5 rounded-xl border border-gray-800 px-4 py-2.5 text-xs font-semibold text-gray-400 transition hover:text-white"
                 >
                   Try again
