@@ -106,6 +106,7 @@ export default function LeaderboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [viewerAddress, setViewerAddress] = useState<string | null>(null);
+  const [rankTestMode, setRankTestMode] = useState(false);
 
   const loadLeaderboard = useCallback(
     async (
@@ -155,6 +156,11 @@ export default function LeaderboardPage() {
   useEffect(() => {
     void loadLeaderboard(false, null);
   }, [loadLeaderboard]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setRankTestMode(params.get("rankTest") === "1");
+  }, []);
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
@@ -243,8 +249,17 @@ export default function LeaderboardPage() {
 
   const players = useMemo(() => {
     if (!data) return [];
-    return data.leaderboards[activeTab];
-  }, [activeTab, data]);
+
+    const rankedPlayers = data.leaderboards[activeTab];
+
+    if (!rankTestMode || !viewerAddress) {
+      return rankedPlayers;
+    }
+
+    return rankedPlayers.filter(
+      (player) => player.address.toLowerCase() !== viewerAddress
+    );
+  }, [activeTab, data, rankTestMode, viewerAddress]);
 
   const viewerRank = data?.viewerRanks?.[activeTab] ?? null;
 
@@ -257,7 +272,9 @@ export default function LeaderboardPage() {
   }, [players, viewerAddress]);
 
   const showYourRank =
-    Boolean(viewerAddress) && Boolean(viewerRank) && !viewerIsVisible;
+    Boolean(viewerAddress) &&
+    Boolean(viewerRank) &&
+    (rankTestMode || !viewerIsVisible);
 
   const openFarcasterProfile = useCallback(
     async (event: React.MouseEvent<HTMLAnchorElement>, username: string) => {
@@ -370,6 +387,13 @@ export default function LeaderboardPage() {
               );
             })}
           </div>
+
+          {rankTestMode && (
+            <div className="mt-5 rounded-2xl border border-dashed border-gray-800 bg-gray-950/60 px-4 py-3 text-[11px] leading-5 text-gray-500">
+              Rank test mode is active. Your connected wallet is temporarily hidden
+              from the visible list so the “Your rank” fallback card can be tested.
+            </div>
+          )}
 
           <div className="mt-5 overflow-hidden rounded-[2rem] border border-gray-900 bg-gray-950/40">
             <div className="flex items-center justify-between border-b border-gray-900 px-5 py-4">
@@ -564,7 +588,9 @@ export default function LeaderboardPage() {
                     </span>
                   </div>
                   <p className="mt-1 text-[10px] text-gray-700">
-                    Outside the top 100 shown above
+                    {rankTestMode
+                      ? "Test mode · hidden from the visible list"
+                      : "Outside the top 100 shown above"}
                   </p>
                 </div>
 
