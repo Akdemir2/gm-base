@@ -298,6 +298,18 @@ export default function Home() {
     ? Math.max(0, nextStreakMilestone.days - walletProgress.streak)
     : 0;
 
+  useEffect(() => {
+    try {
+      if (address) {
+        window.sessionStorage.setItem("gm-base:verified-wallet", address.toLowerCase());
+      } else {
+        window.sessionStorage.removeItem("gm-base:verified-wallet");
+      }
+    } catch {
+      // sessionStorage may be unavailable in restricted WebViews.
+    }
+  }, [address]);
+
   const lastGMCheckKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1323,18 +1335,9 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <a
-              href="/leaderboard"
-              className="rounded-full border border-gray-800 bg-gray-950 px-3 py-1.5 text-[11px] font-medium text-gray-500 transition hover:border-gray-700 hover:text-white"
-            >
-              🏆 Leaderboard
-            </a>
-
-            <span className="rounded-full border border-gray-800 bg-gray-950 px-3 py-1.5 text-[11px] font-medium text-gray-500">
-              Base
-            </span>
-          </div>
+          <span className="rounded-full border border-gray-800 bg-gray-950 px-3 py-1.5 text-[11px] font-medium text-gray-500">
+            Base
+          </span>
         </header>
 
         <div className="flex flex-1 flex-col justify-center py-10">

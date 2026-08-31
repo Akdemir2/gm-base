@@ -266,6 +266,20 @@ export default function LeaderboardPage() {
     };
 
     const resolveViewerWallet = async () => {
+      try {
+        const storedAddress = window.sessionStorage.getItem("gm-base:verified-wallet");
+        if (storedAddress && /^0x[a-fA-F0-9]{40}$/.test(storedAddress)) {
+          setViewerAddress(storedAddress.toLowerCase());
+          setWalletDebug((current) => ({
+            ...current,
+            error: "none · session wallet restored",
+          }));
+          return;
+        }
+      } catch {
+        // Continue with passive provider fallbacks.
+      }
+
       // Keep isInMiniApp() only as diagnostic information. Some Farcaster
       // WebView contexts can report false even though the native wallet
       // provider is available.
