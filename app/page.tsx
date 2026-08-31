@@ -1336,9 +1336,18 @@ export default function Home() {
             </div>
           </div>
 
-          <span className="rounded-full border border-gray-800 bg-gray-950 px-3 py-1.5 text-[11px] font-medium text-gray-500">
-            Base
-          </span>
+          <div className="flex items-center gap-2">
+            <a
+              href={leaderboardUrl}
+              className="rounded-full border border-gray-800 bg-gray-950 px-3 py-1.5 text-[11px] font-medium text-gray-400 transition hover:border-gray-700 hover:text-white"
+            >
+              Leaderboard
+            </a>
+
+            <span className="rounded-full border border-gray-800 bg-gray-950 px-3 py-1.5 text-[11px] font-medium text-gray-500">
+              Base
+            </span>
+          </div>
         </header>
 
         <div className="flex flex-1 flex-col justify-center py-10">
