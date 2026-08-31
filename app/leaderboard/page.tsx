@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sdk } from "@farcaster/miniapp-sdk";
 
 type Tab = "streak" | "totalGM" | "today";
@@ -107,6 +107,7 @@ export default function LeaderboardPage() {
   const [error, setError] = useState("");
   const [viewerAddress, setViewerAddress] = useState<string | null>(null);
   const [rankTestMode, setRankTestMode] = useState(false);
+  const requestSequence = useRef(0);
 
   const loadLeaderboard = useCallback(
     async (
@@ -118,6 +119,7 @@ export default function LeaderboardPage() {
       else if (!silent) setLoading(true);
 
       setError("");
+      const requestId = ++requestSequence.current;
 
       try {
         const viewerQuery = address
@@ -140,14 +142,24 @@ export default function LeaderboardPage() {
         );
       }
 
+      if (requestId !== requestSequence.current) {
+        return;
+      }
+
       setData(payload);
     } catch (err) {
+      if (requestId !== requestSequence.current) {
+        return;
+      }
+
       setError(
         err instanceof Error ? err.message : "Could not load leaderboard."
       );
       } finally {
-        if (!silent) setLoading(false);
-        setRefreshing(false);
+        if (requestId === requestSequence.current) {
+          if (!silent) setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     []
