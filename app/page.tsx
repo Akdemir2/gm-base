@@ -194,6 +194,30 @@ function formatUtcDay(day: number) {
   });
 }
 
+type StreakMilestone = {
+  days: number;
+  icon: string;
+  label: string;
+};
+
+const STREAK_MILESTONES: StreakMilestone[] = [
+  { days: 3, icon: "🔥", label: "3 day spark" },
+  { days: 7, icon: "⚡", label: "7 day charge" },
+  { days: 14, icon: "💎", label: "14 day diamond" },
+  { days: 30, icon: "🏆", label: "30 day champion" },
+  { days: 100, icon: "👑", label: "100 day legend" },
+];
+
+function getNextStreakMilestone(streak: number) {
+  return STREAK_MILESTONES.find((milestone) => streak < milestone.days);
+}
+
+function getHighestUnlockedMilestone(streak: number) {
+  return [...STREAK_MILESTONES]
+    .reverse()
+    .find((milestone) => streak >= milestone.days);
+}
+
 export default function Home() {
   useEffect(() => {
     let cancelled = false;
@@ -246,6 +270,24 @@ export default function Home() {
       streak: 0,
       lastGMDay: 0,
     });
+
+  const nextStreakMilestone = getNextStreakMilestone(
+    walletProgress.streak
+  );
+  const highestUnlockedMilestone = getHighestUnlockedMilestone(
+    walletProgress.streak
+  );
+  const milestoneProgress = nextStreakMilestone
+    ? Math.min(
+        100,
+        Math.round(
+          (walletProgress.streak / nextStreakMilestone.days) * 100
+        )
+      )
+    : 100;
+  const daysToNextMilestone = nextStreakMilestone
+    ? Math.max(0, nextStreakMilestone.days - walletProgress.streak)
+    : 0;
 
   const lastGMCheckKeyRef = useRef<string | null>(null);
 
@@ -1579,6 +1621,105 @@ export default function Home() {
                       <span className="text-xs font-medium text-gray-400">
                         {formatUtcDay(walletProgress.lastGMDay)}
                       </span>
+                    </div>
+
+                    <div className="mt-3 rounded-2xl border border-gray-900 bg-black p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.16em] text-gray-700">
+                            Streak milestones
+                          </p>
+
+                          {nextStreakMilestone ? (
+                            <>
+                              <div className="mt-2 flex items-center gap-2">
+                                <span className="text-2xl">
+                                  {nextStreakMilestone.icon}
+                                </span>
+                                <div>
+                                  <p className="text-sm font-semibold text-white">
+                                    Next: {nextStreakMilestone.days} day streak
+                                  </p>
+                                  <p className="mt-0.5 text-xs text-gray-600">
+                                    {daysToNextMilestone === 1
+                                      ? "1 day to go"
+                                      : `${daysToNextMilestone} days to go`}
+                                  </p>
+                                </div>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="mt-2 flex items-center gap-2">
+                              <span className="text-2xl">👑</span>
+                              <div>
+                                <p className="text-sm font-semibold text-white">
+                                  100 day legend unlocked
+                                </p>
+                                <p className="mt-0.5 text-xs text-gray-600">
+                                  Every listed milestone is unlocked.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <span className="rounded-full border border-gray-800 px-3 py-1 text-[11px] text-gray-500">
+                          {milestoneProgress}%
+                        </span>
+                      </div>
+
+                      <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-900">
+                        <div
+                          className="h-full rounded-full bg-white transition-all duration-500"
+                          style={{ width: `${milestoneProgress}%` }}
+                        />
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-5 gap-2">
+                        {STREAK_MILESTONES.map((milestone) => {
+                          const unlocked =
+                            walletProgress.streak >= milestone.days;
+
+                          return (
+                            <div
+                              key={milestone.days}
+                              className={`rounded-xl border px-2 py-3 text-center ${
+                                unlocked
+                                  ? "border-green-900 bg-green-950/20"
+                                  : "border-gray-900 bg-gray-950"
+                              }`}
+                              title={milestone.label}
+                            >
+                              <div
+                                className={`text-lg ${
+                                  unlocked ? "" : "grayscale opacity-30"
+                                }`}
+                              >
+                                {milestone.icon}
+                              </div>
+                              <p
+                                className={`mt-1 text-[10px] font-semibold ${
+                                  unlocked
+                                    ? "text-green-500"
+                                    : "text-gray-700"
+                                }`}
+                              >
+                                {milestone.days}d
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {highestUnlockedMilestone && (
+                        <p className="mt-3 text-xs text-gray-600">
+                          Latest unlocked:{" "}
+                          <span className="font-medium text-gray-400">
+                            {highestUnlockedMilestone.icon}{" "}
+                            {highestUnlockedMilestone.days} day streak
+                          </span>
+                        </p>
+                      )}
                     </div>
                   </div>
 
