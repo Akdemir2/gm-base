@@ -1,11 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  createPublicClient,
-  http,
-  parseAbiItem,
-  type Address,
-} from "viem";
-import { base } from "viem/chains";
+import type { Address } from "viem";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,22 +7,30 @@ export const dynamic = "force-dynamic";
 const GM_CONTRACT =
   "0xE0712f5fB8b487Ba229bDeE27259c6D4B1696bfb" as Address;
 
-const DEPLOYMENT_BLOCK = BigInt("50618203");
+const GM_EVENT_TOPIC =
+  "0xe260dd3f3558e5fbd6a7b62e9eb1370f4660d1dca056ece3036cd21cd5d93ef6";
 
-// Base public RPC documentation recommends keeping eth_getLogs ranges below
-// 2,000 blocks. 1,500 gives us some safety margin.
-const BLOCK_CHUNK_SIZE = BigInt("1500");
+const BLOCKSCOUT_PUBLIC_BASE = "https://base.blockscout.com";
+const BLOCKSCOUT_PRO_BASE = "https://api.blockscout.com/8453";
+
 const TOP_LIMIT = 100;
+const MAX_PAGES = 100;
 
-// We deliberately use Base's public RPC for historical log scanning so the
-// leaderboard remains compatible with Alchemy Free's 10-block eth_getLogs
-// restriction. BASE_RPC_URL is still used first for lightweight calls such as
-// fetching the current block number.
-const BASE_PUBLIC_RPC = "https://mainnet.base.org";
+type BlockscoutLog = {
+  data?: string;
+  topics?: string[];
+  block_number?: number;
+  index?: number;
+};
 
-const GM_EVENT = parseAbiItem(
-  "event GM(address indexed user, uint256 day, uint256 totalGM, uint256 currentStreak)"
-);
+type BlockscoutPage = {
+  items?: BlockscoutLog[];
+  next_page_params?: {
+    block_number?: number;
+    index?: number;
+    items_count?: number;
+  } | null;
+};
 
 type PlayerState = {
   address: Address;
@@ -38,16 +40,8 @@ type PlayerState = {
   lastBlock: number;
 };
 
-type CachedIndex = {
-  lastScannedBlock: bigint;
-  players: Map<string, PlayerState>;
-};
-
-let memoryIndex: CachedIndex | null = null;
-let updatePromise: Promise<CachedIndex> | null = null;
-
-function getPreferredRpcUrl() {
-  return process.env.BASE_RPC_URL || BASE_PUBLIC_RPC;
+function normalizeAddress(address: string) {
+  return address.toLowerCase();
 }
 
 function toSafeNumber(value: bigint) {
@@ -58,134 +52,177 @@ function toSafeNumber(value: bigint) {
   return Number(value);
 }
 
-function normalizeAddress(address: Address) {
-  return address.toLowerCase();
-}
+function parseUint256Word(data: string, wordIndex: number) {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+  const start = wordIndex * 64;
+  const word = hex.slice(start, start + 64);
 
-function makeClient(url: string) {
-  return createPublicClient({
-    chain: base,
-    transport: http(url, {
-      retryCount: 3,
-      retryDelay: 750,
-      timeout: 20_000,
-    }),
-  });
-}
-
-async function getLatestBlock() {
-  const preferredClient = makeClient(getPreferredRpcUrl());
-
-  try {
-    return await preferredClient.getBlockNumber();
-  } catch (error) {
-    console.info(
-      "Preferred RPC could not fetch latest block, using Base public RPC:",
-      error
-    );
-
-    return makeClient(BASE_PUBLIC_RPC).getBlockNumber();
+  if (word.length !== 64) {
+    throw new Error("Unexpected GM event data length.");
   }
+
+  return BigInt(`0x${word}`);
 }
 
-async function updateIndex() {
-  if (updatePromise) return updatePromise;
+function parseIndexedAddress(topic: string) {
+  const hex = topic.startsWith("0x") ? topic.slice(2) : topic;
 
-  updatePromise = (async () => {
-    const latestBlock = await getLatestBlock();
+  if (hex.length !== 64) {
+    throw new Error("Unexpected indexed address topic.");
+  }
 
-    // Important: historical event logs are fetched from Base public RPC,
-    // not Alchemy Free, because Alchemy Free restricts eth_getLogs on Base
-    // to very small block ranges.
-    const logClient = makeClient(BASE_PUBLIC_RPC);
+  return `0x${hex.slice(24)}` as Address;
+}
 
-    const players = memoryIndex
-      ? new Map(memoryIndex.players)
-      : new Map<string, PlayerState>();
+function getBlockscoutBaseUrl() {
+  return process.env.BLOCKSCOUT_API_KEY
+    ? BLOCKSCOUT_PRO_BASE
+    : BLOCKSCOUT_PUBLIC_BASE;
+}
 
-    let fromBlock = memoryIndex
-      ? memoryIndex.lastScannedBlock + BigInt(1)
-      : DEPLOYMENT_BLOCK;
+function buildLogsUrl(
+  nextPage:
+    | {
+        block_number?: number;
+        index?: number;
+        items_count?: number;
+      }
+    | null
+) {
+  const url = new URL(
+    `${getBlockscoutBaseUrl()}/api/v2/addresses/${GM_CONTRACT}/logs`
+  );
 
-    if (fromBlock > latestBlock) {
-      return (
-        memoryIndex ?? {
-          lastScannedBlock: latestBlock,
-          players,
-        }
+  if (process.env.BLOCKSCOUT_API_KEY) {
+    url.searchParams.set("apikey", process.env.BLOCKSCOUT_API_KEY);
+  }
+
+  if (nextPage?.block_number !== undefined) {
+    url.searchParams.set("block_number", String(nextPage.block_number));
+  }
+
+  if (nextPage?.index !== undefined) {
+    url.searchParams.set("index", String(nextPage.index));
+  }
+
+  if (nextPage?.items_count !== undefined) {
+    url.searchParams.set("items_count", String(nextPage.items_count));
+  }
+
+  return url.toString();
+}
+
+async function fetchBlockscoutPage(
+  nextPage:
+    | {
+        block_number?: number;
+        index?: number;
+        items_count?: number;
+      }
+    | null
+) {
+  const response = await fetch(buildLogsUrl(nextPage), {
+    headers: {
+      Accept: "application/json",
+    },
+    next: {
+      revalidate: 300,
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+
+    throw new Error(
+      `Blockscout request failed (${response.status}): ${body.slice(0, 300)}`
+    );
+  }
+
+  return (await response.json()) as BlockscoutPage;
+}
+
+async function buildLeaderboardFromBlockscout() {
+  const players = new Map<string, PlayerState>();
+
+  let nextPage:
+    | {
+        block_number?: number;
+        index?: number;
+        items_count?: number;
+      }
+    | null = null;
+
+  let pageCount = 0;
+  let highestBlock = 0;
+
+  do {
+    pageCount += 1;
+
+    if (pageCount > MAX_PAGES) {
+      throw new Error(
+        `Blockscout pagination exceeded ${MAX_PAGES} pages.`
       );
     }
 
-    while (fromBlock <= latestBlock) {
-      const candidateToBlock =
-        fromBlock + BLOCK_CHUNK_SIZE - BigInt(1);
+    const page = await fetchBlockscoutPage(nextPage);
 
-      const toBlock =
-        candidateToBlock > latestBlock
-          ? latestBlock
-          : candidateToBlock;
+    for (const log of page.items ?? []) {
+      if (!log.topics || log.topics.length < 2 || !log.data) {
+        continue;
+      }
 
-      const logs = await logClient.getLogs({
-        address: GM_CONTRACT,
-        event: GM_EVENT,
-        fromBlock,
-        toBlock,
-        strict: true,
-      });
+      if (normalizeAddress(log.topics[0]) !== GM_EVENT_TOPIC) {
+        continue;
+      }
 
-      for (const log of logs) {
-        const { user, day, totalGM, currentStreak } = log.args;
+      try {
+        const user = parseIndexedAddress(log.topics[1]);
+        const day = toSafeNumber(parseUint256Word(log.data, 0));
+        const totalGM = toSafeNumber(parseUint256Word(log.data, 1));
+        const currentStreak = toSafeNumber(parseUint256Word(log.data, 2));
+        const blockNumber = log.block_number ?? 0;
 
-        if (
-          !user ||
-          day === undefined ||
-          totalGM === undefined ||
-          currentStreak === undefined
-        ) {
-          continue;
-        }
+        highestBlock = Math.max(highestBlock, blockNumber);
 
         const key = normalizeAddress(user);
-        const blockNumber = toSafeNumber(log.blockNumber);
         const existing = players.get(key);
 
-        if (existing && existing.lastBlock > blockNumber) {
+        // Blockscout returns newest logs first, but this comparison also keeps
+        // the code correct if ordering changes.
+        if (existing && existing.lastBlock >= blockNumber) {
           continue;
         }
 
         players.set(key, {
           address: user,
-          totalGM: toSafeNumber(totalGM),
-          streak: toSafeNumber(currentStreak),
-          lastGMDay: toSafeNumber(day),
+          totalGM,
+          streak: currentStreak,
+          lastGMDay: day,
           lastBlock: blockNumber,
         });
+      } catch (error) {
+        console.warn("Skipping an undecodable GM event:", error);
       }
-
-      fromBlock = toBlock + BigInt(1);
     }
 
-    memoryIndex = {
-      lastScannedBlock: latestBlock,
-      players,
-    };
+    nextPage = page.next_page_params ?? null;
+  } while (nextPage);
 
-    return memoryIndex;
-  })();
-
-  try {
-    return await updatePromise;
-  } finally {
-    updatePromise = null;
-  }
+  return {
+    players,
+    highestBlock,
+    pageCount,
+  };
 }
 
 export async function GET() {
   try {
-    const index = await updateIndex();
+    const { players, highestBlock, pageCount } =
+      await buildLeaderboardFromBlockscout();
+
     const today = Math.floor(Date.now() / 86_400_000);
 
-    const allPlayers = [...index.players.values()].map((player) => {
+    const allPlayers = [...players.values()].map((player) => {
       const activeStreak =
         player.lastGMDay >= today - 1 ? player.streak : 0;
 
@@ -229,13 +266,15 @@ export async function GET() {
       {
         chainId: 8453,
         contract: GM_CONTRACT,
-        deploymentBlock: Number(DEPLOYMENT_BLOCK),
-        indexedToBlock: Number(index.lastScannedBlock),
+        indexedToBlock: highestBlock,
         utcDay: today,
         generatedAt: new Date().toISOString(),
-        dataSource: "Base public RPC (historical logs) + configured RPC (latest block)",
+        dataSource: process.env.BLOCKSCOUT_API_KEY
+          ? "Blockscout PRO API"
+          : "Base Blockscout public REST API",
+        pagesFetched: pageCount,
         playerCount: allPlayers.length,
-        todayCount: allPlayers.filter((player) => player.gmToday).length,
+        todayCount: todayPlayers.length,
         leaderboards: {
           streak,
           totalGM,
@@ -244,8 +283,6 @@ export async function GET() {
       },
       {
         headers: {
-          // Vercel's CDN can serve the computed leaderboard for five minutes,
-          // so repeated visitors do not trigger another historical scan.
           "Cache-Control":
             "public, s-maxage=300, stale-while-revalidate=1800",
         },
