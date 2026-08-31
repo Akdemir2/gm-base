@@ -10,10 +10,21 @@ import { base } from "viem/chains";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const GM_CONTRACT = "0xE0712f5fB8b487Ba229bDeE27259c6D4B1696bfb" as Address;
+const GM_CONTRACT =
+  "0xE0712f5fB8b487Ba229bDeE27259c6D4B1696bfb" as Address;
+
 const DEPLOYMENT_BLOCK = BigInt("50618203");
-const BLOCK_CHUNK_SIZE = BigInt("1900");
+
+// Base public RPC documentation recommends keeping eth_getLogs ranges below
+// 2,000 blocks. 1,500 gives us some safety margin.
+const BLOCK_CHUNK_SIZE = BigInt("1500");
 const TOP_LIMIT = 100;
+
+// We deliberately use Base's public RPC for historical log scanning so the
+// leaderboard remains compatible with Alchemy Free's 10-block eth_getLogs
+// restriction. BASE_RPC_URL is still used first for lightweight calls such as
+// fetching the current block number.
+const BASE_PUBLIC_RPC = "https://mainnet.base.org";
 
 const GM_EVENT = parseAbiItem(
   "event GM(address indexed user, uint256 day, uint256 totalGM, uint256 currentStreak)"
@@ -35,14 +46,8 @@ type CachedIndex = {
 let memoryIndex: CachedIndex | null = null;
 let updatePromise: Promise<CachedIndex> | null = null;
 
-function getRpcUrl() {
-  const rpcUrl = process.env.BASE_RPC_URL;
-
-  if (!rpcUrl) {
-    throw new Error("BASE_RPC_URL is not configured on the server.");
-  }
-
-  return rpcUrl;
+function getPreferredRpcUrl() {
+  return process.env.BASE_RPC_URL || BASE_PUBLIC_RPC;
 }
 
 function toSafeNumber(value: bigint) {
@@ -57,20 +62,42 @@ function normalizeAddress(address: Address) {
   return address.toLowerCase();
 }
 
+function makeClient(url: string) {
+  return createPublicClient({
+    chain: base,
+    transport: http(url, {
+      retryCount: 3,
+      retryDelay: 750,
+      timeout: 20_000,
+    }),
+  });
+}
+
+async function getLatestBlock() {
+  const preferredClient = makeClient(getPreferredRpcUrl());
+
+  try {
+    return await preferredClient.getBlockNumber();
+  } catch (error) {
+    console.info(
+      "Preferred RPC could not fetch latest block, using Base public RPC:",
+      error
+    );
+
+    return makeClient(BASE_PUBLIC_RPC).getBlockNumber();
+  }
+}
+
 async function updateIndex() {
   if (updatePromise) return updatePromise;
 
   updatePromise = (async () => {
-    const client = createPublicClient({
-      chain: base,
-      transport: http(getRpcUrl(), {
-        retryCount: 3,
-        retryDelay: 500,
-        timeout: 20_000,
-      }),
-    });
+    const latestBlock = await getLatestBlock();
 
-    const latestBlock = await client.getBlockNumber();
+    // Important: historical event logs are fetched from Base public RPC,
+    // not Alchemy Free, because Alchemy Free restricts eth_getLogs on Base
+    // to very small block ranges.
+    const logClient = makeClient(BASE_PUBLIC_RPC);
 
     const players = memoryIndex
       ? new Map(memoryIndex.players)
@@ -90,12 +117,15 @@ async function updateIndex() {
     }
 
     while (fromBlock <= latestBlock) {
-      const toBlock =
-        fromBlock + BLOCK_CHUNK_SIZE - BigInt(1) > latestBlock
-          ? latestBlock
-          : fromBlock + BLOCK_CHUNK_SIZE - BigInt(1);
+      const candidateToBlock =
+        fromBlock + BLOCK_CHUNK_SIZE - BigInt(1);
 
-      const logs = await client.getLogs({
+      const toBlock =
+        candidateToBlock > latestBlock
+          ? latestBlock
+          : candidateToBlock;
+
+      const logs = await logClient.getLogs({
         address: GM_CONTRACT,
         event: GM_EVENT,
         fromBlock,
@@ -203,6 +233,7 @@ export async function GET() {
         indexedToBlock: Number(index.lastScannedBlock),
         utcDay: today,
         generatedAt: new Date().toISOString(),
+        dataSource: "Base public RPC (historical logs) + configured RPC (latest block)",
         playerCount: allPlayers.length,
         todayCount: allPlayers.filter((player) => player.gmToday).length,
         leaderboards: {
@@ -213,7 +244,10 @@ export async function GET() {
       },
       {
         headers: {
-          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+          // Vercel's CDN can serve the computed leaderboard for five minutes,
+          // so repeated visitors do not trigger another historical scan.
+          "Cache-Control":
+            "public, s-maxage=300, stale-while-revalidate=1800",
         },
       }
     );
