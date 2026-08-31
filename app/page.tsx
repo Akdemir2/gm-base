@@ -263,6 +263,7 @@ export default function Home() {
   const [isFarcasterAccountVerified, setIsFarcasterAccountVerified] =
     useState(false);
   const [address, setAddress] = useState<string | undefined>();
+  const leaderboardUrl = address ? `/leaderboard?viewer=${encodeURIComponent(address)}` : "/leaderboard";
   const [chainId, setChainId] = useState<number | undefined>();
   const [status, setStatus] = useState<Status>("idle");
   const [txHash, setTxHash] = useState<string | undefined>();

@@ -166,6 +166,20 @@ export default function LeaderboardPage() {
   }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const viewer = params.get("viewer");
+
+    if (viewer && /^0x[a-fA-F0-9]{40}$/.test(viewer)) {
+      setViewerAddress(viewer.toLowerCase());
+      setWalletDebug((current) => ({
+        ...current,
+        error: "none · viewer restored from URL",
+      }));
+    }
+  }, []);
+
+
+  useEffect(() => {
     let cleanup: (() => void) | undefined;
     let cancelled = false;
 
@@ -266,6 +280,18 @@ export default function LeaderboardPage() {
     };
 
     const resolveViewerWallet = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const viewerFromUrl = params.get("viewer");
+
+      if (viewerFromUrl && /^0x[a-fA-F0-9]{40}$/.test(viewerFromUrl)) {
+        setViewerAddress(viewerFromUrl.toLowerCase());
+        setWalletDebug((current) => ({
+          ...current,
+          error: "none · viewer restored from URL",
+        }));
+        return;
+      }
+
       try {
         const storedAddress = window.sessionStorage.getItem("gm-base:verified-wallet");
         if (storedAddress && /^0x[a-fA-F0-9]{40}$/.test(storedAddress)) {
