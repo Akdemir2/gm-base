@@ -106,21 +106,9 @@ export default function LeaderboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [viewerAddress, setViewerAddress] = useState<string | null>(null);
-  const [rankTestMode, setRankTestMode] = useState(false);
   const [viewerRanks, setViewerRanks] = useState<
     LeaderboardResponse["viewerRanks"] | null
   >(null);
-  const [viewerRankDebug, setViewerRankDebug] = useState<
-    "idle" | "loading" | "completed" | "error"
-  >("idle");
-  const [walletDebug, setWalletDebug] = useState({
-    miniApp: "checking",
-    farcasterProvider: "not checked",
-    farcasterAccounts: "not checked",
-    browserProvider: "not checked",
-    browserAccounts: "not checked",
-    error: "none",
-  });
 
   const loadLeaderboard = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -160,43 +148,19 @@ export default function LeaderboardPage() {
     void loadLeaderboard();
   }, [loadLeaderboard]);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    setRankTestMode(params.get("rankTest") === "1");
-  }, []);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const viewer = params.get("viewer");
-
-    if (viewer && /^0x[a-fA-F0-9]{40}$/.test(viewer)) {
-      setViewerAddress(viewer.toLowerCase());
-      setWalletDebug((current) => ({
-        ...current,
-        error: "none · viewer restored from URL",
-      }));
-    }
-  }, []);
 
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
     let cancelled = false;
 
-    const formatAccounts = (accounts: unknown) => {
-      if (!Array.isArray(accounts)) return String(accounts);
-      if (accounts.length === 0) return "[]";
-      return accounts
-        .map((account) =>
-          typeof account === "string" ? account.toLowerCase() : String(account)
-        )
-        .join(", ");
-    };
-
     const setAddressFromAccounts = (accounts: unknown) => {
-      if (cancelled) return false;
-
-      if (Array.isArray(accounts) && typeof accounts[0] === "string") {
+      if (
+        !cancelled &&
+        Array.isArray(accounts) &&
+        typeof accounts[0] === "string"
+      ) {
         setViewerAddress(accounts[0].toLowerCase());
         return true;
       }
@@ -204,42 +168,20 @@ export default function LeaderboardPage() {
       return false;
     };
 
-    const attachProvider = async (
-      provider: WalletProvider,
-      source: "farcaster" | "browser"
-    ) => {
+    const attachProvider = async (provider: WalletProvider) => {
       try {
         const accounts = await provider.request({ method: "eth_accounts" });
-
-        if (!cancelled) {
-          setWalletDebug((current) => ({
-            ...current,
-            ...(source === "farcaster"
-              ? { farcasterAccounts: formatAccounts(accounts) }
-              : { browserAccounts: formatAccounts(accounts) }),
-          }));
-        }
-
         const found = setAddressFromAccounts(accounts);
 
         const handleAccountsChanged = (...args: unknown[]) => {
           const changedAccounts = args[0];
-
-          if (!cancelled) {
-            setWalletDebug((current) => ({
-              ...current,
-              ...(source === "farcaster"
-                ? { farcasterAccounts: formatAccounts(changedAccounts) }
-                : { browserAccounts: formatAccounts(changedAccounts) }),
-            }));
-          }
 
           if (
             Array.isArray(changedAccounts) &&
             typeof changedAccounts[0] === "string"
           ) {
             setViewerAddress(changedAccounts[0].toLowerCase());
-          } else if (source === "browser") {
+          } else if (!cancelled) {
             setViewerAddress(null);
           }
         };
@@ -252,159 +194,54 @@ export default function LeaderboardPage() {
 
         return found;
       } catch (error) {
-        if (!cancelled) {
-          setWalletDebug((current) => ({
-            ...current,
-            ...(source === "farcaster"
-              ? { farcasterAccounts: "ERROR" }
-              : { browserAccounts: "ERROR" }),
-            error:
-              error instanceof Error ? error.message : String(error),
-          }));
-        }
-
+        console.warn("Passive wallet detection failed:", error);
         return false;
       }
-    };
-
-    const withTimeout = async <T,>(
-      promise: Promise<T>,
-      ms: number
-    ): Promise<T | null> => {
-      return await Promise.race([
-        promise,
-        new Promise<null>((resolve) =>
-          window.setTimeout(() => resolve(null), ms)
-        ),
-      ]);
     };
 
     const resolveViewerWallet = async () => {
       const params = new URLSearchParams(window.location.search);
       const viewerFromUrl = params.get("viewer");
 
-      if (viewerFromUrl && /^0x[a-fA-F0-9]{40}$/.test(viewerFromUrl)) {
+      if (
+        viewerFromUrl &&
+        /^0x[a-fA-F0-9]{40}$/.test(viewerFromUrl)
+      ) {
         setViewerAddress(viewerFromUrl.toLowerCase());
-        setWalletDebug((current) => ({
-          ...current,
-          error: "none · viewer restored from URL",
-        }));
         return;
       }
 
       try {
-        const storedAddress = window.sessionStorage.getItem("gm-base:verified-wallet");
-        if (storedAddress && /^0x[a-fA-F0-9]{40}$/.test(storedAddress)) {
-          setViewerAddress(storedAddress.toLowerCase());
-          setWalletDebug((current) => ({
-            ...current,
-            error: "none · session wallet restored",
-          }));
-          return;
-        }
-      } catch {
-        // Continue with passive provider fallbacks.
-      }
+        const inMiniApp = await Promise.race([
+          sdk.isInMiniApp(),
+          new Promise<boolean>((resolve) =>
+            window.setTimeout(() => resolve(false), 1000)
+          ),
+        ]);
 
-      // Keep isInMiniApp() only as diagnostic information. Some Farcaster
-      // WebView contexts can report false even though the native wallet
-      // provider is available.
-      try {
-        const inMiniApp = await withTimeout(sdk.isInMiniApp(), 800);
+        if (cancelled) return;
 
-        if (!cancelled) {
-          setWalletDebug((current) => ({
-            ...current,
-            miniApp: inMiniApp === null ? "timeout" : String(inMiniApp),
-          }));
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setWalletDebug((current) => ({
-            ...current,
-            miniApp: "error",
-            error:
-              error instanceof Error ? error.message : String(error),
-          }));
-        }
-      }
+        if (inMiniApp) {
+          const farcasterProvider =
+            (await sdk.wallet.getEthereumProvider()) as unknown as WalletProvider;
 
-      // Try the Farcaster native wallet even when isInMiniApp() is false.
-      // Guard it with a short timeout so normal web/Base App contexts cannot
-      // hang on the SDK call.
-      try {
-        if (!cancelled) {
-          setWalletDebug((current) => ({
-            ...current,
-            farcasterProvider: "checking",
-          }));
-        }
+          if (cancelled) return;
 
-        const farcasterProvider = await withTimeout(
-          sdk.wallet.getEthereumProvider(),
-          1200
-        );
-
-        if (!cancelled) {
-          setWalletDebug((current) => ({
-            ...current,
-            farcasterProvider: farcasterProvider
-              ? "available"
-              : "unavailable",
-          }));
-        }
-
-        if (farcasterProvider) {
-          const found = await attachProvider(
-            farcasterProvider as unknown as WalletProvider,
-            "farcaster"
-          );
-
+          const found = await attachProvider(farcasterProvider);
           if (found) return;
         }
       } catch (error) {
-        if (!cancelled) {
-          setWalletDebug((current) => ({
-            ...current,
-            farcasterProvider: "error",
-            error:
-              error instanceof Error ? error.message : String(error),
-          }));
-        }
+        console.warn("Farcaster wallet detection unavailable:", error);
       }
 
-      // Fallback for normal browser / Base App injected wallets.
       const browserProvider = (
         window as typeof window & {
-          ethereum?: {
-            request: (args: {
-              method: string;
-              params?: unknown[];
-            }) => Promise<unknown>;
-            on?: (
-              event: string,
-              listener: (...args: unknown[]) => void
-            ) => void;
-            removeListener?: (
-              event: string,
-              listener: (...args: unknown[]) => void
-            ) => void;
-          };
+          ethereum?: WalletProvider;
         }
       ).ethereum;
 
-      if (!cancelled) {
-        setWalletDebug((current) => ({
-          ...current,
-          browserProvider: browserProvider ? "available" : "missing",
-        }));
-      }
-
       if (browserProvider) {
-        const found = await attachProvider(
-          browserProvider as unknown as WalletProvider,
-          "browser"
-        );
+        const found = await attachProvider(browserProvider);
 
         if (!found && !cancelled) {
           setViewerAddress(null);
@@ -428,11 +265,9 @@ export default function LeaderboardPage() {
     const loadViewerRanks = async () => {
       if (!viewerAddress) {
         setViewerRanks(null);
-        setViewerRankDebug("idle");
         return;
       }
 
-      setViewerRankDebug("loading");
 
       try {
         const response = await fetch(
@@ -453,12 +288,10 @@ export default function LeaderboardPage() {
         }
 
         setViewerRanks(payload.viewerRanks ?? null);
-        setViewerRankDebug("completed");
       } catch (error) {
         if (!cancelled) {
           console.warn("Could not load viewer rank:", error);
           setViewerRanks(null);
-          setViewerRankDebug("error");
         }
       }
     };
@@ -472,17 +305,8 @@ export default function LeaderboardPage() {
 
   const players = useMemo(() => {
     if (!data) return [];
-
-    const rankedPlayers = data.leaderboards[activeTab];
-
-    if (!rankTestMode || !viewerAddress) {
-      return rankedPlayers;
-    }
-
-    return rankedPlayers.filter(
-      (player) => player.address.toLowerCase() !== viewerAddress
-    );
-  }, [activeTab, data, rankTestMode, viewerAddress]);
+    return data.leaderboards[activeTab];
+  }, [activeTab, data]);
 
   const viewerRank = viewerRanks?.[activeTab] ?? null;
 
@@ -497,7 +321,7 @@ export default function LeaderboardPage() {
   const showYourRank =
     Boolean(viewerAddress) &&
     Boolean(viewerRank) &&
-    (rankTestMode || !viewerIsVisible);
+    !viewerIsVisible;
 
   const openFarcasterProfile = useCallback(
     async (event: React.MouseEvent<HTMLAnchorElement>, username: string) => {
@@ -611,27 +435,6 @@ export default function LeaderboardPage() {
             })}
           </div>
 
-          {rankTestMode && (
-            <div className="mt-5 rounded-2xl border border-dashed border-gray-800 bg-gray-950/60 px-4 py-3 text-[11px] leading-5 text-gray-500">
-              <p>
-                Rank test mode is active. Your connected wallet is temporarily hidden
-                from the visible list so the “Your rank” fallback card can be tested.
-              </p>
-              <div className="mt-3 border-t border-gray-800 pt-3 font-mono text-[10px] leading-5">
-                <div>Detected wallet: <span className="text-gray-300">{viewerAddress ?? "none"}</span></div>
-                <div>Mini App: <span className="text-gray-300">{walletDebug.miniApp}</span></div>
-                <div>Farcaster provider: <span className="text-gray-300">{walletDebug.farcasterProvider}</span></div>
-                <div className="break-all">Farcaster eth_accounts: <span className="text-gray-300">{walletDebug.farcasterAccounts}</span></div>
-                <div>Browser provider: <span className="text-gray-300">{walletDebug.browserProvider}</span></div>
-                <div className="break-all">Browser eth_accounts: <span className="text-gray-300">{walletDebug.browserAccounts}</span></div>
-                <div className="break-all">Wallet error: <span className="text-gray-300">{walletDebug.error}</span></div>
-                <div>Viewer request: <span className="text-gray-300">{viewerRankDebug}</span></div>
-                <div>Streak rank: <span className="text-gray-300">{viewerRanks?.streak?.rank ? `#${viewerRanks.streak.rank}` : "null"}</span></div>
-                <div>Total GM rank: <span className="text-gray-300">{viewerRanks?.totalGM?.rank ? `#${viewerRanks.totalGM.rank}` : "null"}</span></div>
-                <div>Today rank: <span className="text-gray-300">{viewerRanks?.today?.rank ? `#${viewerRanks.today.rank}` : "null"}</span></div>
-              </div>
-            </div>
-          )}
 
           <div className="mt-5 overflow-hidden rounded-[2rem] border border-gray-900 bg-gray-950/40">
             <div className="flex items-center justify-between border-b border-gray-900 px-5 py-4">
@@ -826,9 +629,7 @@ export default function LeaderboardPage() {
                     </span>
                   </div>
                   <p className="mt-1 text-[10px] text-gray-700">
-                    {rankTestMode
-                      ? "Test mode · hidden from the visible list"
-                      : "Outside the top 100 shown above"}
+                    Outside the top 100 shown above
                   </p>
                 </div>
 

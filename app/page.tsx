@@ -299,17 +299,6 @@ export default function Home() {
     ? Math.max(0, nextStreakMilestone.days - walletProgress.streak)
     : 0;
 
-  useEffect(() => {
-    try {
-      if (address) {
-        window.sessionStorage.setItem("gm-base:verified-wallet", address.toLowerCase());
-      } else {
-        window.sessionStorage.removeItem("gm-base:verified-wallet");
-      }
-    } catch {
-      // sessionStorage may be unavailable in restricted WebViews.
-    }
-  }, [address]);
 
   const lastGMCheckKeyRef = useRef<string | null>(null);
 
@@ -1344,16 +1333,6 @@ export default function Home() {
               Leaderboard
             </a>
 
-            <a
-              href={
-                address
-                  ? `/leaderboard?viewer=${encodeURIComponent(address)}&rankTest=1`
-                  : "/leaderboard?rankTest=1"
-              }
-              className="rounded-full border border-amber-900/60 bg-amber-950/20 px-3 py-1.5 text-[11px] font-medium text-amber-300 transition hover:border-amber-700 hover:text-amber-200"
-            >
-              Rank Test
-            </a>
 
             <span className="rounded-full border border-gray-800 bg-gray-950 px-3 py-1.5 text-[11px] font-medium text-gray-500">
               Base
