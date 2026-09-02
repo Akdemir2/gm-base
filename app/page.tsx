@@ -425,6 +425,8 @@ export default function Home() {
       setError("");
 
       if (!nextAddress) {
+        setSelectedProvider(null);
+        setChainId(undefined);
         setWalletProgress({
           totalGM: 0,
           streak: 0,
