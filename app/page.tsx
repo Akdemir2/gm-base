@@ -1505,9 +1505,13 @@ export default function Home() {
                       </p>
 
                       {address && (
-                        <p className="mt-1 break-all font-mono text-[10px] leading-4 text-yellow-500">
-                          DEBUG wallet: {address}
-                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void navigator.clipboard.writeText(address)}
+                          className="mt-1 text-[10px] font-medium text-yellow-500 underline underline-offset-2"
+                        >
+                          Copy full address
+                        </button>
                       )}
                     </div>
                   </div>
