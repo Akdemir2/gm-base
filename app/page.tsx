@@ -1503,6 +1503,12 @@ export default function Home() {
                       <p className="mt-0.5 font-mono text-xs text-gray-600">
                         {shortenAddress(address)}
                       </p>
+
+                      {address && (
+                        <p className="mt-1 break-all font-mono text-[10px] leading-4 text-yellow-500">
+                          DEBUG wallet: {address}
+                        </p>
+                      )}
                     </div>
                   </div>
 
