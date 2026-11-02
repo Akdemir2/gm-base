@@ -542,7 +542,7 @@ export default function Home() {
               to: GM_CONTRACT,
               data: `${CAN_GM_SELECTOR}${addressArg}`,
             },
-            "pending",
+            "latest",
           ],
         }) as Promise<string>,
         provider.request({
@@ -552,7 +552,7 @@ export default function Home() {
               to: GM_CONTRACT,
               data: `${GET_USER_STATS_SELECTOR}${addressArg}`,
             },
-            "pending",
+            "latest",
           ],
         }) as Promise<string>,
       ]);
